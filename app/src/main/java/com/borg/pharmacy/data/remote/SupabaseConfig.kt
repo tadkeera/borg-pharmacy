@@ -2,7 +2,6 @@ package com.borg.pharmacy.data.remote
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
-import io.github.jan.supabase.gotrue.GoTrue
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
 
@@ -13,6 +12,5 @@ object SupabaseConfig {
     ) {
         install(Postgrest)
         install(Realtime)
-        install(GoTrue)
     }
 }
