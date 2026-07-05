@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("kotlin-kapt")
 }
 
 android {
@@ -56,6 +57,14 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     
+    // Room Database
+    val roomVersion = "2.6.0"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    kapt("androidx.room:room-compiler:$roomVersion")
+
+    // KSP required for Room since kotlin 1.9+ but we'll use kapt here by enabling kotlin-kapt plugin
+
     // Supabase
     implementation("io.github.jan-tennert.supabase:postgrest-kt:2.0.0")
     implementation("io.github.jan-tennert.supabase:realtime-kt:2.0.0")
