@@ -1,7 +1,20 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("kotlin-kapt")
+}
+
+// Load the release signing credentials from keystore.properties.
+// The keystore is committed so every build (local + CI) produces an APK
+// signed with the SAME key, guaranteeing consistent updates for users.
+val keystoreProperties = Properties().apply {
+    val keystoreFile = rootProject.file("keystore.properties")
+    if (keystoreFile.exists()) {
+        load(FileInputStream(keystoreFile))
+    }
 }
 
 android {
@@ -12,8 +25,12 @@ android {
         applicationId = "com.borg.pharmacy"
         minSdk = 26
         targetSdk = 34
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+
+        // Bumped version: this is the first properly-signed, installable release.
+        // CI builds keep auto-incrementing via GITHUB_RUN_NUMBER so future
+        // releases always carry a higher versionCode than the previous one.
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "2").toInt()
+        versionName = "1.1.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -21,10 +38,30 @@ android {
         }
     }
 
+    // ===== RELEASE SIGNING CONFIG (fixes "App not installed - package invalid") =====
+    signingConfigs {
+        create("release") {
+            keystoreProperties["storeFile"]?.let { storeFile = rootProject.file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Apply the release signing key so the output APK is signed and installable.
+            signingConfig = signingConfigs.getByName("release")
+
+            // R8/ProGuard minification disabled for maximum runtime safety
+            // (avoids stripping Supabase/Ktor reflection-based code).
+            isMinifyEnabled = false
+            isShrinkResources = false
+
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
     compileOptions {
@@ -62,8 +99,6 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     kapt("androidx.room:room-compiler:$roomVersion")
-
-    // KSP required for Room since kotlin 1.9+ but we'll use kapt here by enabling kotlin-kapt plugin
 
     // Supabase
     implementation("io.github.jan-tennert.supabase:postgrest-kt:2.0.0")
