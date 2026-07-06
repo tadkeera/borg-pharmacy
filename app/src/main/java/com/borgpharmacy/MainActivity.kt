@@ -218,10 +218,10 @@ class MainActivity : ComponentActivity() {
             "pdf" -> File(dir, "borg_weekly_schedules_$stamp.pdf").also { writeSchedulesPdf(it, state) }
             else -> return
         }
-        shareExportFile(file, "تصدير جداول زيارات صيدلية برج الأطباء")
+        shareFile(file, "تصدير جداول زيارات صيدلية برج الأطباء")
     }
 
-    private fun shareExportFile(file: File, subject: String) {
+    private fun shareFile(file: File, subject: String) {
         val uri = (application as BorgPharmacyApplication).container.backupService.uriFor(file)
         val mime = when (file.extension.lowercase(Locale.US)) {
             "csv" -> "text/csv"
@@ -249,15 +249,11 @@ class MainActivity : ComponentActivity() {
                 (0..4).forEach { dayOffset ->
                     val date = weekStart.plusDays(dayOffset.toLong())
                     listOf(Shift.MORNING, Shift.EVENING).forEach { shift ->
-                        state.visits
-                            .filter { it.cycleStartEpochDay == currentEpoch && it.date == date && it.shift == shift }
-                            .scheduleDisplaySorted()
-                            .forEachIndexed { index, visit ->
-                                append(week).append(',')
-                                append(csv(date.toString())).append(',')
+                        state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == date && it.shift == shift }
+                            .scheduleDisplaySorted().forEachIndexed { index, visit ->
+                                append(week).append(',').append(csv(date.toString())).append(',')
                                 append(csv(visit.date.dayOfWeek.borgArabicName())).append(',')
-                                append(csv(visit.shift.arabicName)).append(',')
-                                append(index + 1).append(',')
+                                append(csv(visit.shift.arabicName)).append(',').append(index + 1).append(',')
                                 append(csv(companies[visit.companyId]?.name ?: "شركة غير معروفة")).append(',')
                                 append(csv(visit.companyId)).append('\n')
                             }
@@ -271,7 +267,7 @@ class MainActivity : ComponentActivity() {
         fun esc(value: String): String = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
         val companies = state.companies.associateBy { it.id }
         val currentEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
-        fun shiftHtml(week: Int, date: java.time.LocalDate, shift: Shift): String {
+        fun listHtml(date: java.time.LocalDate, shift: Shift): String {
             val visits = state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == date && it.shift == shift }.scheduleDisplaySorted()
             return buildString {
                 append("<div class='shift ${if (shift == Shift.MORNING) "morning" else "evening"}'><h4>${esc(shift.arabicName)} <span>${visits.size}</span></h4>")
@@ -281,22 +277,18 @@ class MainActivity : ComponentActivity() {
         }
         file.writeText(buildString {
             append("""
-                <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
-                <style>
-                @page{size:A4 landscape;margin:7mm}*{box-sizing:border-box}body{font-family:Arial,'Tahoma',sans-serif;margin:0;color:#082B52;background:#eef4fb}.page{width:100%;min-height:190mm;page-break-after:always;background:white;border-radius:18px;padding:10mm;box-shadow:0 4px 18px #0002}.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #0E4D8F;padding-bottom:6px;margin-bottom:10px}.header h1{margin:0;color:#0E4D8F}.days{display:grid;gap:8px;height:155mm}.days.three{grid-template-columns:repeat(3,1fr)}.days.two{grid-template-columns:repeat(2,1fr)}.day{border:2px solid #d7e6f3;border-radius:18px;padding:8px;background:#f9fcff;overflow:hidden}.day h3{text-align:center;margin:0 0 8px;font-size:18px;color:#082B52}.shift{border-radius:14px;padding:6px;margin-bottom:7px}.morning{background:#EAF4FF;border:1px solid #b7d8f1}.evening{background:#FFF0F4;border:1px solid #f2bfd0}.shift h4{margin:0 0 5px;font-size:15px}.morning h4{color:#0E4D8F}.evening h4{color:#C8172B}.company{display:flex;align-items:center;gap:5px;background:white;border-radius:10px;margin:3px 0;padding:4px 6px;font-size:12px;min-height:22px}.company b{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:50%;color:white;background:#0E4D8F}.evening .company b{background:#C8172B}.company span{line-height:1.25}.footer{position:absolute;bottom:8mm;left:12mm;color:#697386;font-size:11px}
-                </style><title>جداول زيارات صيدلية برج الأطباء</title></head><body>
+                <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><style>
+                @page{size:A4 landscape;margin:7mm}body{font-family:Arial,Tahoma,sans-serif;margin:0;background:#eef4fb;color:#082B52}.page{page-break-after:always;background:#fff;border-radius:18px;padding:10mm;min-height:190mm}.header{display:flex;justify-content:space-between;border-bottom:3px solid #0E4D8F;margin-bottom:8px}.days{display:grid;gap:8px}.three{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:repeat(2,1fr)}.day{border:2px solid #d7e6f3;border-radius:18px;padding:8px;background:#f9fcff}.day h3{text-align:center;margin:0 0 8px}.shift{border-radius:14px;padding:6px;margin-bottom:7px}.morning{background:#EAF4FF}.evening{background:#FFF0F4}.morning h4{color:#0E4D8F}.evening h4{color:#C8172B}.company{display:flex;gap:6px;background:white;border-radius:10px;margin:3px 0;padding:4px 6px;font-size:12px}.company b{background:#0E4D8F;color:white;border-radius:50%;min-width:22px;text-align:center}.evening .company b{background:#C8172B}
+                </style></head><body>
             """.trimIndent())
             (1..4).forEach { week ->
                 val weekStart = state.cycleInfo.currentCycleStart.plusDays(((week - 1) * 7).toLong())
                 listOf(0..2, 3..4).forEachIndexed { pageIndex, range ->
-                    append("<section class='page'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - ${if (pageIndex == 0) "السبت إلى الإثنين" else "الثلاثاء والأربعاء"}</h2></div>")
-                    append("<div class='days ${if (pageIndex == 0) "three" else "two"}'>")
+                    append("<section class='page'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - ${if (pageIndex == 0) "السبت إلى الإثنين" else "الثلاثاء والأربعاء"}</h2></div><div class='days ${if (pageIndex == 0) "three" else "two"}'>")
                     range.forEach { dayOffset ->
                         val date = weekStart.plusDays(dayOffset.toLong())
-                        append("<div class='day'><h3>${esc(date.dayOfWeek.borgArabicName())}<br><small>${esc(date.toString())}</small></h3>")
-                        append(shiftHtml(week, date, Shift.MORNING))
-                        append(shiftHtml(week, date, Shift.EVENING))
-                        append("</div>")
+                        append("<div class='day'><h3>${esc(date.dayOfWeek.borgArabicName())}<br><small>${date}</small></h3>")
+                        append(listHtml(date, Shift.MORNING)).append(listHtml(date, Shift.EVENING)).append("</div>")
                     }
                     append("</div></section>")
                 }
@@ -311,29 +303,19 @@ class MainActivity : ComponentActivity() {
         val document = PdfDocument()
         val pageWidth = 842
         val pageHeight = 595
-        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(14, 77, 143); textSize = 18f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); textAlign = Paint.Align.RIGHT }
-        val headPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8, 43, 82); textSize = 13f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); textAlign = Paint.Align.CENTER }
-        val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8, 43, 82); textSize = 8.5f; textAlign = Paint.Align.RIGHT }
-        val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 8f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); textAlign = Paint.Align.CENTER }
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(14, 77, 143); textSize = 18f; typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.RIGHT }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8, 43, 82); textSize = 8.5f; textAlign = Paint.Align.RIGHT }
         fun ellipsize(text: String, max: Int) = if (text.length <= max) text else text.take(max - 1) + "…"
-        fun drawRoundRect(canvas: android.graphics.Canvas, left: Float, top: Float, right: Float, bottom: Float, color: Int, stroke: Int? = null) {
-            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
-            canvas.drawRoundRect(left, top, right, bottom, 12f, 12f, p)
-            if (stroke != null) { p.style = Paint.Style.STROKE; p.strokeWidth = 1.4f; p.color = stroke; canvas.drawRoundRect(left, top, right, bottom, 12f, 12f, p) }
-        }
         fun drawShift(canvas: android.graphics.Canvas, x: Float, y: Float, w: Float, h: Float, title: String, visits: List<Visit>, accent: Int, bg: Int) {
-            drawRoundRect(canvas, x, y, x + w, y + h, bg, accent)
-            val hp = Paint(headPaint).apply { color = accent; textSize = 11f }
-            canvas.drawText("$title (${visits.size})", x + w / 2, y + 16f, hp)
-            var cy = y + 29f
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bg; style = Paint.Style.FILL }
+            canvas.drawRoundRect(x, y, x + w, y + h, 12f, 12f, p)
+            p.style = Paint.Style.STROKE; p.strokeWidth = 1.2f; p.color = accent; canvas.drawRoundRect(x, y, x + w, y + h, 12f, 12f, p)
+            canvas.drawText("$title (${visits.size})", x + w - 8f, y + 16f, Paint(textPaint).apply { color = accent; textSize = 11f; typeface = Typeface.DEFAULT_BOLD })
+            var cy = y + 30f
             visits.forEachIndexed { index, visit ->
                 if (cy > y + h - 8f) return@forEachIndexed
-                drawRoundRect(canvas, x + 6f, cy - 10f, x + w - 6f, cy + 6f, Color.WHITE, null)
-                val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accent; style = Paint.Style.FILL }
-                canvas.drawCircle(x + w - 18f, cy - 2f, 7f, circlePaint)
-                canvas.drawText((index + 1).toString(), x + w - 18f, cy + 1f, numPaint)
-                canvas.drawText(ellipsize(companies[visit.companyId]?.name ?: "شركة غير معروفة", 24), x + w - 30f, cy + 1f, smallPaint)
-                cy += 18f
+                canvas.drawText("${index + 1}. ${ellipsize(companies[visit.companyId]?.name ?: "شركة غير معروفة", 24)}", x + w - 8f, cy, textPaint)
+                cy += 16f
             }
         }
         var pageNo = 1
@@ -342,27 +324,16 @@ class MainActivity : ComponentActivity() {
             listOf(0..2, 3..4).forEachIndexed { pageIndex, range ->
                 val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo++).create())
                 val c = page.canvas
-                drawRoundRect(c, 18f, 18f, pageWidth - 18f, pageHeight - 18f, Color.WHITE, Color.rgb(210, 226, 239))
-                c.drawText("جداول زيارات صيدلية برج الأطباء", pageWidth - 35f, 45f, titlePaint)
-                c.drawText("الأسبوع $week - ${if (pageIndex == 0) "السبت / الأحد / الإثنين" else "الثلاثاء / الأربعاء"}", 320f, 45f, Paint(headPaint).apply { textSize = 15f })
-                val gap = 10f
-                val cols = range.count()
-                val left = 34f
-                val top = 70f
-                val colW = (pageWidth - 68f - (cols - 1) * gap) / cols
-                val colH = pageHeight - 105f
+                c.drawColor(Color.WHITE)
+                c.drawText("جداول زيارات صيدلية برج الأطباء", pageWidth - 32f, 42f, titlePaint)
+                c.drawText("الأسبوع $week - ${if (pageIndex == 0) "السبت / الأحد / الإثنين" else "الثلاثاء / الأربعاء"}", 390f, 42f, Paint(titlePaint).apply { textAlign = Paint.Align.CENTER; textSize = 14f })
+                val cols = range.count(); val gap = 10f; val left = 30f; val top = 65f; val colW = (pageWidth - 60f - (cols - 1) * gap) / cols; val colH = pageHeight - 92f
                 range.forEachIndexed { i, dayOffset ->
-                    val x = left + i * (colW + gap)
-                    val date = weekStart.plusDays(dayOffset.toLong())
-                    drawRoundRect(c, x, top, x + colW, top + colH, Color.rgb(249, 252, 255), Color.rgb(183, 216, 241))
-                    c.drawText(date.dayOfWeek.borgArabicName(), x + colW / 2, top + 21f, Paint(headPaint).apply { textSize = 14f })
-                    c.drawText(date.toString(), x + colW / 2, top + 38f, Paint(headPaint).apply { textSize = 9f; color = Color.rgb(105, 115, 134) })
+                    val x = left + i * (colW + gap); val date = weekStart.plusDays(dayOffset.toLong())
+                    c.drawText(date.dayOfWeek.borgArabicName(), x + colW / 2, top + 18f, Paint(titlePaint).apply { textAlign = Paint.Align.CENTER; textSize = 13f; color = Color.rgb(8,43,82) })
                     val dayVisits = state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == date }
-                    val morning = dayVisits.filter { it.shift == Shift.MORNING }.scheduleDisplaySorted()
-                    val evening = dayVisits.filter { it.shift == Shift.EVENING }.scheduleDisplaySorted()
-                    val shiftH = (colH - 56f) / 2f
-                    drawShift(c, x + 8f, top + 48f, colW - 16f, shiftH, "الصباح", morning, Color.rgb(14, 77, 143), Color.rgb(234, 244, 255))
-                    drawShift(c, x + 8f, top + 54f + shiftH, colW - 16f, shiftH, "المساء", evening, Color.rgb(200, 23, 43), Color.rgb(255, 240, 244))
+                    drawShift(c, x, top + 32f, colW, (colH - 38f) / 2f, "الصباح", dayVisits.filter { it.shift == Shift.MORNING }.scheduleDisplaySorted(), Color.rgb(14,77,143), Color.rgb(234,244,255))
+                    drawShift(c, x, top + 38f + (colH - 38f) / 2f, colW, (colH - 38f) / 2f, "المساء", dayVisits.filter { it.shift == Shift.EVENING }.scheduleDisplaySorted(), Color.rgb(200,23,43), Color.rgb(255,240,244))
                 }
                 document.finishPage(page)
             }

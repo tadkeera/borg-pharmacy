@@ -170,6 +170,7 @@ class OfflineFirstBorgRepository(
             val plan = scheduleGenerator.reconcileSingleCompany(start, company, visits)
             applySchedulePlan(plan)
             persistBaseSlotsFromVisits(plan.visitsToUpsert)
+            repairCurrentCycleLocked(start)
         }
         afterMutation("company")
         return company
@@ -189,7 +190,7 @@ class OfflineFirstBorgRepository(
             db.withTransaction {
                 db.companyDao().upsertAll(rows)
                 val start = cycleStart()
-var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+                var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
                 val allUpserts = mutableListOf<Visit>()
                 rows.forEach { row ->
                     val plan = scheduleGenerator.reconcileSingleCompany(start, row.toDomain(), workingVisits)
@@ -199,6 +200,7 @@ var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomai
                     allUpserts += plan.visitsToUpsert
                 }
                 persistBaseSlotsFromVisits(allUpserts)
+                repairCurrentCycleLocked(start)
             }
             afterMutation("csv_import")
         }
@@ -234,12 +236,12 @@ var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomai
                 workingVisits = workingVisits.filterNot { it.id in deleteIds } + plan.visitsToUpsert
             }
 
-            val finalPlan = SchedulePlan(
-                visitsToUpsert = accumulatedUpserts.distinctBy { it.id },
-                visitsToSoftDelete = accumulatedDeletes.distinctBy { it.id },
+            applySchedulePlan(
+                SchedulePlan(
+                    visitsToUpsert = accumulatedUpserts.distinctBy { it.id },
+                    visitsToSoftDelete = accumulatedDeletes.distinctBy { it.id },
+                )
             )
-            applySchedulePlan(finalPlan)
-            persistBaseSlotsFromVisits(finalPlan.visitsToUpsert)
         }
         afterMutation("tier_batch")
     }
@@ -280,16 +282,44 @@ var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomai
             val visit = visitsByCompany[company.id]
                 ?.filter { it.weekOfCycle == 1 }
                 ?.minWithOrNull(compareBy<Visit> { it.date }.thenBy { it.shift.ordinal })
+                ?: visitsByCompany[company.id]?.minWithOrNull(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal })
                 ?: return@forEach
-            val baseDayIndex = ((visit.dayOfCycle - 1) % 7).coerceIn(0, 4)
-            db.companyDao().updateBaseSlot(company.id, baseDayIndex, visit.shift.name)
+            val inferredDay = Math.floorMod((((visit.dayOfCycle - 1) % 7).coerceIn(0, 4)) - (visit.weekOfCycle - 1), 5)
+            val inferredShift = if (visit.weekOfCycle == 2 || visit.weekOfCycle == 4) {
+                if (visit.shift == com.borgpharmacy.domain.Shift.MORNING) com.borgpharmacy.domain.Shift.EVENING else com.borgpharmacy.domain.Shift.MORNING
+            } else {
+                visit.shift
+            }
+            db.companyDao().updateBaseSlot(company.id, inferredDay, inferredShift.name)
         }
+    }
+
+    private suspend fun repairCurrentCycleLocked(start: LocalDate): Boolean {
+        persistMissingBaseSlots(start)
+        var changed = false
+        var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+        val companies = db.companyDao().listActive().map { it.toDomain() }
+        companies.forEach { company ->
+            val activeCount = workingVisits.count { it.companyId == company.id }
+            if (activeCount == 4 && company.baseDayIndex != null && company.baseShift != null) return@forEach
+            val plan = scheduleGenerator.reconcileSingleCompany(start, company, workingVisits)
+            if (plan.visitsToUpsert.isNotEmpty() || plan.visitsToSoftDelete.isNotEmpty()) {
+                applySchedulePlan(plan)
+                persistBaseSlotsFromVisits(plan.visitsToUpsert)
+                val deleteIds = plan.visitsToSoftDelete.map { it.id }.toSet()
+                workingVisits = workingVisits.filterNot { it.id in deleteIds } + plan.visitsToUpsert
+                changed = true
+            }
+        }
+        persistMissingBaseSlots(start)
+        return changed
     }
 
     override suspend fun deleteCompany(companyId: String) {
         db.withTransaction {
             db.companyDao().softDelete(companyId)
             db.visitDao().softDeleteForCompany(companyId)
+            repairCurrentCycleLocked(cycleStart())
         }
         afterMutation("company_delete")
     }
@@ -334,7 +364,7 @@ var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomai
         db.withTransaction {
             applySchedulePlan(plan)
             persistBaseSlotsFromVisits(plan.visitsToUpsert)
-            persistMissingBaseSlots(start)
+            repairCurrentCycleLocked(start)
         }
         afterMutation("schedule")
     }
@@ -386,18 +416,7 @@ var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomai
 
         val currentVisits = db.visitDao().listCycle(currentEpoch).map { it.toDomain() }
         if (currentVisits.isNotEmpty()) {
-            persistMissingBaseSlots(start)
-            var workingVisits = currentVisits
-            val missingCompanies = companies.filter { company -> workingVisits.none { it.companyId == company.id } }
-            val upserts = mutableListOf<Visit>()
-            missingCompanies.forEach { company ->
-                val plan = scheduleGenerator.reconcileSingleCompany(start, company, workingVisits)
-                applySchedulePlan(plan)
-                persistBaseSlotsFromVisits(plan.visitsToUpsert)
-                workingVisits = workingVisits + plan.visitsToUpsert
-                upserts += plan.visitsToUpsert
-            }
-            return upserts.isNotEmpty()
+            return repairCurrentCycleLocked(start)
         }
 
         val templateEpoch = db.visitDao().latestCycleBefore(currentEpoch)

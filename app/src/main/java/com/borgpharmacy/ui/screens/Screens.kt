@@ -574,7 +574,7 @@ private fun WeeklyScreen(state: BorgUiState, onExportSchedules: (String) -> Unit
     Column(modifier.padding(16.dp)) {
         HeaderCard(
             title = "جداول الزيارات الأسبوعية",
-            subtitle = "عرض احترافي لكل أسبوع مع شبكة التدوير العادلة وعدم تغيير مواقع الشركات المقفلة.",
+            subtitle = "عرض احترافي لكل أسبوع مع توزيع متوازن يستوعب أكثر من 400 شركة دوائية عند الحاجة.",
             gradient = listOf(DeepNavy, BorgBlue),
         )
         Spacer(Modifier.height(8.dp))
@@ -703,11 +703,6 @@ private fun CompanyProfilesScreen(
                 }
                 OutlinedButton(onClick = onImportCsv, enabled = state.isAdmin) { Icon(Icons.Default.UploadFile, null); Spacer(Modifier.width(6.dp)); Text("استيراد CSV") }
                 ExportDropdown(label = "تصدير", onExport = onExportCompanies)
-                OutlinedButton(onClick = { showDeleteAllConfirm = true }, enabled = state.isAdmin && state.companies.isNotEmpty()) {
-                    Icon(Icons.Default.Delete, null, tint = BorgRed)
-                    Spacer(Modifier.width(6.dp))
-                    Text("حذف الكل", color = BorgRed)
-                }
                 OutlinedButton(onClick = { showDeleteAllConfirm = true }, enabled = state.isAdmin && state.companies.isNotEmpty()) {
                     Icon(Icons.Default.Delete, null, tint = BorgRed)
                     Spacer(Modifier.width(6.dp))
@@ -954,10 +949,7 @@ private fun ExportDropdown(label: String, onExport: (String) -> Unit) {
     }
 }
 
-private fun List<Visit>.displaySorted(): List<Visit> = sortedWith(
-    compareBy<Visit> { it.createdAt }
-        .thenBy { it.id }
-)
+private fun List<Visit>.displaySorted(): List<Visit> = sortedWith(compareBy<Visit> { it.createdAt }.thenBy { it.id })
 
 @Composable
 private fun SearchBox(value: String, onValueChange: (String) -> Unit, label: String) {
