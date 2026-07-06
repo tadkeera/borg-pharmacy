@@ -189,11 +189,16 @@ class OfflineFirstBorgRepository(
             db.withTransaction {
                 db.companyDao().upsertAll(rows)
                 val start = cycleStart()
-                val companies = db.companyDao().listActive().map { it.toDomain() }
-                val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
-                val plan = scheduleGenerator.reconcile(start, companies, visits)
-                applySchedulePlan(plan)
-                persistBaseSlotsFromVisits(plan.visitsToUpsert)
+var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+                val allUpserts = mutableListOf<Visit>()
+                rows.forEach { row ->
+                    val plan = scheduleGenerator.reconcileSingleCompany(start, row.toDomain(), workingVisits)
+                    applySchedulePlan(plan)
+                    persistBaseSlotsFromVisits(plan.visitsToUpsert)
+                    workingVisits = workingVisits + plan.visitsToUpsert
+                    allUpserts += plan.visitsToUpsert
+                }
+                persistBaseSlotsFromVisits(allUpserts)
             }
             afterMutation("csv_import")
         }
@@ -348,7 +353,16 @@ class OfflineFirstBorgRepository(
 
             val remote = syncService.pullAll()
             db.withTransaction {
-                if (remote.companies.isNotEmpty()) db.companyDao().upsertAll(remote.companies)
+                if (remote.companies.isNotEmpty()) {
+                    val mergedCompanies = remote.companies.map { remoteCompany ->
+                        val local = db.companyDao().getById(remoteCompany.id)
+                        remoteCompany.copy(
+                            baseDayIndex = remoteCompany.baseDayIndex ?: local?.baseDayIndex,
+                            baseShift = remoteCompany.baseShift ?: local?.baseShift,
+                        )
+                    }
+                    db.companyDao().upsertAll(mergedCompanies)
+                }
                 if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
                 if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
             }
@@ -371,30 +385,41 @@ class OfflineFirstBorgRepository(
         if (companies.isEmpty()) return false
 
         val currentVisits = db.visitDao().listCycle(currentEpoch).map { it.toDomain() }
-        val candidateVisits = if (currentVisits.isNotEmpty()) {
-            currentVisits
-        } else {
-            val templateEpoch = db.visitDao().latestCycleBefore(currentEpoch)
-            if (templateEpoch != null) {
-                val activeCompanyIds = companies.map { it.id }.toSet()
-                db.visitDao().listCycle(templateEpoch)
-                    .map { it.toDomain() }
-                    .filter { it.companyId in activeCompanyIds }
-                    .map { template ->
-                        val date = start.plusDays((template.dayOfCycle - 1).toLong())
-                        template.copy(
-                            id = UUID.nameUUIDFromBytes("${template.companyId}-$currentEpoch-${template.dayOfCycle}-${template.shift}-${template.slotIndex}".toByteArray()).toString(),
-                            cycleStartEpochDay = currentEpoch,
-                            date = date,
-                            status = VisitStatus.SCHEDULED,
-                            createdAt = System.currentTimeMillis(),
-                            updatedAt = System.currentTimeMillis(),
-                            deletedAt = null,
-                        )
-                    }
-            } else {
-                emptyList()
+        if (currentVisits.isNotEmpty()) {
+            persistMissingBaseSlots(start)
+            var workingVisits = currentVisits
+            val missingCompanies = companies.filter { company -> workingVisits.none { it.companyId == company.id } }
+            val upserts = mutableListOf<Visit>()
+            missingCompanies.forEach { company ->
+                val plan = scheduleGenerator.reconcileSingleCompany(start, company, workingVisits)
+                applySchedulePlan(plan)
+                persistBaseSlotsFromVisits(plan.visitsToUpsert)
+                workingVisits = workingVisits + plan.visitsToUpsert
+                upserts += plan.visitsToUpsert
             }
+            return upserts.isNotEmpty()
+        }
+
+        val templateEpoch = db.visitDao().latestCycleBefore(currentEpoch)
+        val candidateVisits = if (templateEpoch != null) {
+            val activeCompanyIds = companies.map { it.id }.toSet()
+            db.visitDao().listCycle(templateEpoch)
+                .map { it.toDomain() }
+                .filter { it.companyId in activeCompanyIds }
+                .map { template ->
+                    val date = start.plusDays((template.dayOfCycle - 1).toLong())
+                    template.copy(
+                        id = UUID.nameUUIDFromBytes("${template.companyId}-$currentEpoch-${template.dayOfCycle}-${template.shift}-${template.slotIndex}".toByteArray()).toString(),
+                        cycleStartEpochDay = currentEpoch,
+                        date = date,
+                        status = VisitStatus.SCHEDULED,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                        deletedAt = null,
+                    )
+                }
+        } else {
+            emptyList()
         }
 
         val plan = scheduleGenerator.reconcile(start, companies, candidateVisits)

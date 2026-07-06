@@ -134,6 +134,7 @@ fun BorgApp(
     onAddCompany: (String) -> Unit,
     onImportCsv: () -> Unit,
     onExportCompanies: (String) -> Unit,
+    onExportSchedules: (String) -> Unit,
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onDeleteAllCompanies: () -> Unit,
@@ -195,7 +196,7 @@ fun BorgApp(
                 .background(Color(0xFFF7FAFE))
             when (selected) {
                 Route.HOME -> HomeScreen(state, onPrint, onMarkVisitStatus, onSync, contentModifier)
-                Route.WEEKLY -> WeeklyScreen(state, contentModifier)
+                Route.WEEKLY -> WeeklyScreen(state, onExportSchedules, contentModifier)
                 Route.COMPANIES -> CompanyProfilesScreen(
                     state = state,
                     onAddCompany = onAddCompany,
@@ -331,7 +332,7 @@ private fun HomeScreen(
                 subtitle = "استقبال مندوبي الشركات في الفترة الصباحية",
                 accent = BorgBlue,
                 softAccent = SoftBlue,
-                visits = visitsToday.filter { it.shift == Shift.MORNING }.sortedBy { it.slotIndex },
+                visits = visitsToday.filter { it.shift == Shift.MORNING }.displaySorted(),
                 companies = companies,
                 state = state,
                 onPrint = onPrint,
@@ -344,7 +345,7 @@ private fun HomeScreen(
                 subtitle = "تنظيم زيارات المساء بسلاسة ووضوح",
                 accent = BorgRed,
                 softAccent = SoftRed,
-                visits = visitsToday.filter { it.shift == Shift.EVENING }.sortedBy { it.slotIndex },
+                visits = visitsToday.filter { it.shift == Shift.EVENING }.displaySorted(),
                 companies = companies,
                 state = state,
                 onPrint = onPrint,
@@ -566,16 +567,18 @@ private fun VisitTableRow(
 }
 
 @Composable
-private fun WeeklyScreen(state: BorgUiState, modifier: Modifier) {
+private fun WeeklyScreen(state: BorgUiState, onExportSchedules: (String) -> Unit, modifier: Modifier) {
     var selectedWeek by rememberSaveable { mutableStateOf(1) }
     val companies = state.companies.associateBy { it.id }
     val currentCycleEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
     Column(modifier.padding(16.dp)) {
         HeaderCard(
             title = "جداول الزيارات الأسبوعية",
-            subtitle = "عرض احترافي لكل أسبوع مع توزيع متوازن يستوعب أكثر من 400 شركة دوائية عند الحاجة.",
+            subtitle = "عرض احترافي لكل أسبوع مع شبكة التدوير العادلة وعدم تغيير مواقع الشركات المقفلة.",
             gradient = listOf(DeepNavy, BorgBlue),
         )
+        Spacer(Modifier.height(8.dp))
+        ExportDropdown(label = "تصدير", onExport = onExportSchedules)
         Spacer(Modifier.height(12.dp))
         TabRow(selectedTabIndex = selectedWeek - 1, containerColor = Color.White, contentColor = BorgBlue) {
             (1..4).forEach { week ->
@@ -600,8 +603,8 @@ private fun WeeklyScreen(state: BorgUiState, modifier: Modifier) {
 
 @Composable
 private fun WeeklyDayCard(day: LocalDate, visits: List<Visit>, companies: Map<String, Company>) {
-    val morning = visits.filter { it.shift == Shift.MORNING }.sortedBy { it.slotIndex }
-    val evening = visits.filter { it.shift == Shift.EVENING }.sortedBy { it.slotIndex }
+    val morning = visits.filter { it.shift == Shift.MORNING }.displaySorted()
+    val evening = visits.filter { it.shift == Shift.EVENING }.displaySorted()
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(26.dp),
@@ -641,7 +644,7 @@ private fun WeeklyShiftPanel(title: String, visits: List<Visit>, companies: Map<
         if (visits.isEmpty()) {
             Text("لا توجد زيارات", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
         }
-        visits.forEach { visit ->
+        visits.forEachIndexed { index, visit ->
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -650,7 +653,7 @@ private fun WeeklyShiftPanel(title: String, visits: List<Visit>, companies: Map<
                     .padding(horizontal = 8.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("${visit.slotIndex}", color = accent, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
+                Text("${index + 1}", color = accent, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
                 Text(companies[visit.companyId]?.name ?: "شركة غير معروفة", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, color = DeepNavy)
             }
         }
@@ -699,10 +702,11 @@ private fun CompanyProfilesScreen(
                     Button(onClick = { onAddCompany(newCompany); newCompany = "" }, enabled = state.isAdmin) { Text("إضافة") }
                 }
                 OutlinedButton(onClick = onImportCsv, enabled = state.isAdmin) { Icon(Icons.Default.UploadFile, null); Spacer(Modifier.width(6.dp)); Text("استيراد CSV") }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onExportCompanies("csv") }) { Text("تصدير CSV") }
-                    OutlinedButton(onClick = { onExportCompanies("pdf") }) { Text("تصدير PDF") }
-                    OutlinedButton(onClick = { onExportCompanies("html") }) { Text("تصدير HTML") }
+                ExportDropdown(label = "تصدير", onExport = onExportCompanies)
+                OutlinedButton(onClick = { showDeleteAllConfirm = true }, enabled = state.isAdmin && state.companies.isNotEmpty()) {
+                    Icon(Icons.Default.Delete, null, tint = BorgRed)
+                    Spacer(Modifier.width(6.dp))
+                    Text("حذف الكل", color = BorgRed)
                 }
                 OutlinedButton(onClick = { showDeleteAllConfirm = true }, enabled = state.isAdmin && state.companies.isNotEmpty()) {
                     Icon(Icons.Default.Delete, null, tint = BorgRed)
@@ -932,6 +936,28 @@ private fun HeaderCard(title: String, subtitle: String, gradient: List<Color>) {
         }
     }
 }
+
+@Composable
+private fun ExportDropdown(label: String, onExport: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.UploadFile, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text(label)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("PDF") }, onClick = { expanded = false; onExport("pdf") })
+            DropdownMenuItem(text = { Text("CSV") }, onClick = { expanded = false; onExport("csv") })
+            DropdownMenuItem(text = { Text("HTML") }, onClick = { expanded = false; onExport("html") })
+        }
+    }
+}
+
+private fun List<Visit>.displaySorted(): List<Visit> = sortedWith(
+    compareBy<Visit> { it.createdAt }
+        .thenBy { it.id }
+)
 
 @Composable
 private fun SearchBox(value: String, onValueChange: (String) -> Unit, label: String) {
