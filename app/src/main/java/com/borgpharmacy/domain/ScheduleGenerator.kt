@@ -99,7 +99,7 @@ class ScheduleGenerator(
 
         fun ensureCompanyRotation(company: Company): SchedulePlan {
             val current = visitsForCompany(company.id)
-            val baseCell = lockedBaseCellForCompany(company.id) ?: chooseLeastLoadedBaseCell()
+            val baseCell = company.lockedBaseCellOrNull() ?: lockedBaseCellForCompany(company.id) ?: chooseLeastLoadedBaseCell()
             val desired = (1..4).map { week -> createVisit(company.id, baseCell, week) }
             val desiredKeys = desired.map { visitKey(it) }.toSet()
             val currentKeys = current.map { visitKey(it) }.toSet()
@@ -208,6 +208,12 @@ private data class RotatedCell(
     val dayIndex: Int,
     val shift: Shift,
 )
+
+private fun Company.lockedBaseCellOrNull(): BaseCell? {
+    val day = baseDayIndex ?: return null
+    val shift = baseShift ?: return null
+    return if (day in 0..4) BaseCell(day, shift) else null
+}
 
 private fun Shift.inverted(): Shift = when (this) {
     Shift.MORNING -> Shift.EVENING

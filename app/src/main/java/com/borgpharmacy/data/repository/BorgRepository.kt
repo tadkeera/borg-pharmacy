@@ -165,9 +165,11 @@ class OfflineFirstBorgRepository(
         val company = Company(name = name.trim().ifBlank { "شركة بدون اسم" })
         db.withTransaction {
             db.companyDao().upsert(company.toEntity())
-            val visits = db.visitDao().listCycle(cycleStart().toEpochDay()).map { it.toDomain() }
-            val plan = scheduleGenerator.reconcileSingleCompany(cycleStart(), company, visits)
+            val start = cycleStart()
+            val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+            val plan = scheduleGenerator.reconcileSingleCompany(start, company, visits)
             applySchedulePlan(plan)
+            persistBaseSlotsFromVisits(plan.visitsToUpsert)
         }
         afterMutation("company")
         return company
@@ -191,6 +193,7 @@ class OfflineFirstBorgRepository(
                 val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
                 val plan = scheduleGenerator.reconcile(start, companies, visits)
                 applySchedulePlan(plan)
+                persistBaseSlotsFromVisits(plan.visitsToUpsert)
             }
             afterMutation("csv_import")
         }
@@ -226,12 +229,12 @@ class OfflineFirstBorgRepository(
                 workingVisits = workingVisits.filterNot { it.id in deleteIds } + plan.visitsToUpsert
             }
 
-            applySchedulePlan(
-                SchedulePlan(
-                    visitsToUpsert = accumulatedUpserts.distinctBy { it.id },
-                    visitsToSoftDelete = accumulatedDeletes.distinctBy { it.id },
-                )
+            val finalPlan = SchedulePlan(
+                visitsToUpsert = accumulatedUpserts.distinctBy { it.id },
+                visitsToSoftDelete = accumulatedDeletes.distinctBy { it.id },
             )
+            applySchedulePlan(finalPlan)
+            persistBaseSlotsFromVisits(finalPlan.visitsToUpsert)
         }
         afterMutation("tier_batch")
     }
@@ -251,6 +254,31 @@ class OfflineFirstBorgRepository(
         val deleteIds = plan.visitsToSoftDelete.map { it.id }
         if (deleteIds.isNotEmpty()) db.visitDao().softDeleteByIds(deleteIds)
         if (plan.visitsToUpsert.isNotEmpty()) db.visitDao().upsertAll(plan.visitsToUpsert.map { it.toEntity() })
+    }
+
+    private suspend fun persistBaseSlotsFromVisits(visits: List<Visit>) {
+        visits
+            .filter { it.weekOfCycle == 1 }
+            .groupBy { it.companyId }
+            .forEach { (companyId, companyVisits) ->
+                val visit = companyVisits.minWithOrNull(compareBy<Visit> { it.date }.thenBy { it.shift.ordinal }) ?: return@forEach
+                val baseDayIndex = ((visit.dayOfCycle - 1) % 7).coerceIn(0, 4)
+                db.companyDao().updateBaseSlot(companyId, baseDayIndex, visit.shift.name)
+            }
+    }
+
+    private suspend fun persistMissingBaseSlots(start: LocalDate) {
+        val companies = db.companyDao().listActive().filter { it.baseDayIndex == null || it.baseShift == null }
+        if (companies.isEmpty()) return
+        val visitsByCompany = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }.groupBy { it.companyId }
+        companies.forEach { company ->
+            val visit = visitsByCompany[company.id]
+                ?.filter { it.weekOfCycle == 1 }
+                ?.minWithOrNull(compareBy<Visit> { it.date }.thenBy { it.shift.ordinal })
+                ?: return@forEach
+            val baseDayIndex = ((visit.dayOfCycle - 1) % 7).coerceIn(0, 4)
+            db.companyDao().updateBaseSlot(company.id, baseDayIndex, visit.shift.name)
+        }
     }
 
     override suspend fun deleteCompany(companyId: String) {
@@ -298,7 +326,11 @@ class OfflineFirstBorgRepository(
         val companies = db.companyDao().listActive().map { it.toDomain() }
         val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
         val plan = scheduleGenerator.reconcile(start, companies, visits)
-        db.withTransaction { applySchedulePlan(plan) }
+        db.withTransaction {
+            applySchedulePlan(plan)
+            persistBaseSlotsFromVisits(plan.visitsToUpsert)
+            persistMissingBaseSlots(start)
+        }
         afterMutation("schedule")
     }
 
@@ -366,8 +398,13 @@ class OfflineFirstBorgRepository(
         }
 
         val plan = scheduleGenerator.reconcile(start, companies, candidateVisits)
-        if (plan.visitsToUpsert.isEmpty() && plan.visitsToSoftDelete.isEmpty()) return false
+        if (plan.visitsToUpsert.isEmpty() && plan.visitsToSoftDelete.isEmpty()) {
+            persistMissingBaseSlots(start)
+            return false
+        }
         applySchedulePlan(plan)
+        persistBaseSlotsFromVisits(plan.visitsToUpsert)
+        persistMissingBaseSlots(start)
         return true
     }
 

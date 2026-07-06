@@ -5,6 +5,8 @@ create table if not exists public.companies (
   id uuid primary key,
   name text not null,
   tier text not null default 'UNRATED',
+  base_day_index int,
+  base_shift text,
   created_at bigint not null,
   updated_at bigint not null,
   deleted_at bigint

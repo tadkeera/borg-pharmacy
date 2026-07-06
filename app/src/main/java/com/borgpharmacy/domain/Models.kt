@@ -36,6 +36,8 @@ data class Company(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val tier: Tier = Tier.UNRATED,
+    val baseDayIndex: Int? = null, // locked Week-1 coordinate: 0=Sat .. 4=Wed
+    val baseShift: Shift? = null, // locked Week-1 shift
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
