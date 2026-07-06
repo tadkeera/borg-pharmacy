@@ -2,163 +2,255 @@ package com.borgpharmacy.domain
 
 import java.time.LocalDate
 import java.util.UUID
-import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.max
 
 /**
- * Deterministic 28-day scheduler for Borg Pharmacy.
+ * Borg Pharmacy matrix scheduler.
  *
- * Current behavior:
- * - The cycle is fixed at 28 calendar days.
- * - Only Saturday-Wednesday receive visits; Thursday/Friday are official weekends.
- * - Morning default capacity is 7 and Evening default capacity is 8.
- * - Silent overflow still begins after the default capacity, but the hard limit is dynamic so
- *   very large datasets (400+ companies, and even multiple visits per company) can be distributed
- *   without failing the scheduling operation.
- * - Existing visits are never shuffled. Upgrades add only the missing visit(s).
- * - Downgrades remove only excess visits, starting with the latest visits.
- * - Company deletion removes all visits for that company and leaves everyone else untouched.
+ * The cycle schedule is represented as a fixed 20 x 2 matrix:
+ * - 20 columns = the real working days in the 28-day cycle (Saturday-Wednesday for four weeks).
+ * - 2 rows = Morning (row 0) and Evening (row 1).
+ *
+ * Each cell contains the fixed ordered visits/company IDs already assigned to that working day and shift.
+ * The red-line rule is enforced here: no operation shuffles or recalculates existing visits. We only:
+ * - add new visits into the lightest available cells;
+ * - prune excess visits from the heaviest cells occupied by that company;
+ * - remove a deleted company from every cell.
  */
 class ScheduleGenerator(
     private val cycleCalculator: CycleCalculator = CycleCalculator(),
-    private val morningDefaultCapacity: Int = 7,
-    private val eveningDefaultCapacity: Int = 8,
-    private val minimumOverflowCapacity: Int = 10,
+    private val morningDefaultMin: Int = 6,
+    private val morningDefaultMax: Int = 7,
+    private val eveningDefaultMin: Int = 7,
+    private val eveningDefaultMax: Int = 8,
+    private val absoluteCellMax: Int = 10,
 ) {
     fun reconcile(
         cycleStart: LocalDate,
         companies: List<Company>,
         existingVisits: List<Visit>,
     ): SchedulePlan {
-        val activeCompanies = companies.filterNot { it.isDeleted }.filter { it.tier.visitsPerCycle > 0 }
-        val activeCompanyIds = activeCompanies.map { it.id }.toSet()
-        val cycleStartEpoch = cycleStart.toEpochDay()
-        val workingDates = cycleCalculator.workingDatesInCycle(cycleStart)
-        val dynamicCapacity = dynamicShiftCapacity(activeCompanies, workingDates.size * Shift.entries.size)
-
-        val activeExisting = existingVisits
-            .filterNot { it.isDeleted }
-            .filter { it.cycleStartEpochDay == cycleStartEpoch }
-
+        val matrix = HealthcareScheduler(cycleStart, existingVisits, cycleCalculator, absoluteCellMax)
+        val activeCompanies = companies.filterNot { it.isDeleted }
+        val activeIds = activeCompanies.map { it.id }.toSet()
         val visitsToDelete = mutableListOf<Visit>()
-        visitsToDelete += activeExisting.filter { it.companyId !in activeCompanyIds }
+        val visitsToAdd = mutableListOf<Visit>()
 
-        val kept = activeExisting.filterNot { visit -> visitsToDelete.any { it.id == visit.id } }.toMutableList()
-        val additions = mutableListOf<Visit>()
-
-        for (company in activeCompanies.sortedWith(compareBy<Company> { stableHash(it.id) }.thenBy { it.name.lowercase() })) {
-            val current = kept
-                .filter { it.companyId == company.id }
-                .sortedWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal }.thenBy { it.slotIndex })
-            val expected = company.tier.visitsPerCycle
-            when {
-                current.size > expected -> {
-                    val excess = current.size - expected
-                    val removed = current.takeLast(excess)
-                    visitsToDelete += removed
-                    kept.removeAll { candidate -> removed.any { it.id == candidate.id } }
-                }
-                current.size < expected -> {
-                    val missing = expected - current.size
-                    repeat(missing) {
-                        val visitNumber = current.size + additions.count { it.companyId == company.id } + 1
-                        val slot = chooseSlot(
-                            cycleStart = cycleStart,
-                            workingDates = workingDates,
-                            desiredVisitNumber = visitNumber,
-                            expectedVisits = expected,
-                            companyId = company.id,
-                            occupied = kept + additions,
-                            dynamicCapacity = dynamicCapacity,
-                        )
-                        val dayOfCycle = cycleCalculator.dayOfCycle(cycleStart, slot.date)
-                        additions += Visit(
-                            id = stableVisitId(company.id, cycleStartEpoch, visitNumber),
-                            companyId = company.id,
-                            cycleStartEpochDay = cycleStartEpoch,
-                            dayOfCycle = dayOfCycle,
-                            weekOfCycle = cycleCalculator.weekOfCycle(dayOfCycle),
-                            date = slot.date,
-                            shift = slot.shift,
-                            slotIndex = slot.slotIndex,
-                        )
-                    }
-                }
-            }
+        val removedCompanies = existingVisits
+            .filterNot { it.isDeleted }
+            .filter { it.companyId !in activeIds || activeCompanies.firstOrNull { company -> company.id == it.companyId }?.tier?.visitsPerCycle == 0 }
+        removedCompanies.map { it.companyId }.distinct().forEach { companyId ->
+            visitsToDelete += matrix.deleteCompanyCompletely(companyId)
         }
 
+        activeCompanies
+            .filter { it.tier.visitsPerCycle > 0 }
+            .sortedWith(compareBy<Company> { it.tier.ordinal }.thenBy { it.name.lowercase() }.thenBy { it.id })
+            .forEach { company ->
+                val plan = reconcileSingleCompany(matrix, company)
+                visitsToDelete += plan.visitsToSoftDelete
+                visitsToAdd += plan.visitsToUpsert
+            }
+
         return SchedulePlan(
-            visitsToUpsert = additions,
+            visitsToUpsert = visitsToAdd.distinctBy { it.id },
             visitsToSoftDelete = visitsToDelete.distinctBy { it.id },
         )
     }
 
-    private fun dynamicShiftCapacity(activeCompanies: List<Company>, shiftBuckets: Int): Int {
-        val totalVisits = activeCompanies.sumOf { it.tier.visitsPerCycle }
-        if (shiftBuckets <= 0) return minimumOverflowCapacity
-        // +2 creates breathing room and prevents unnecessary hard failures with uneven tiers.
-        return max(minimumOverflowCapacity, ceil(totalVisits.toDouble() / shiftBuckets.toDouble()).toInt() + 2)
+    fun reconcileSingleCompany(
+        cycleStart: LocalDate,
+        company: Company,
+        existingVisits: List<Visit>,
+    ): SchedulePlan {
+        val matrix = HealthcareScheduler(cycleStart, existingVisits, cycleCalculator, absoluteCellMax)
+        return reconcileSingleCompany(matrix, company)
     }
 
-    private fun chooseSlot(
+    fun deleteCompanyVisits(
         cycleStart: LocalDate,
-        workingDates: List<LocalDate>,
-        desiredVisitNumber: Int,
-        expectedVisits: Int,
         companyId: String,
-        occupied: List<Visit>,
-        dynamicCapacity: Int,
-    ): SlotCandidate {
-        val targetIndex = targetWorkingDateIndex(companyId, desiredVisitNumber, expectedVisits, workingDates.size)
-        val targetShift = targetShift(companyId, desiredVisitNumber)
+        existingVisits: List<Visit>,
+    ): SchedulePlan {
+        val matrix = HealthcareScheduler(cycleStart, existingVisits, cycleCalculator, absoluteCellMax)
+        return SchedulePlan(
+            visitsToUpsert = emptyList(),
+            visitsToSoftDelete = matrix.deleteCompanyCompletely(companyId),
+        )
+    }
 
-        val candidates = workingDates.flatMapIndexed { dateIndex, date ->
-            Shift.entries.mapNotNull { shift ->
-                val visitsInShift = occupied.filter { it.date == date && it.shift == shift }
-                val hasCompanySameDay = occupied.any { it.companyId == companyId && it.date == date }
-                if (hasCompanySameDay || visitsInShift.size >= dynamicCapacity) {
-                    null
-                } else {
-                    val nextSlot = (visitsInShift.maxOfOrNull { it.slotIndex } ?: 0) + 1
-                    val defaultCap = if (shift == Shift.MORNING) morningDefaultCapacity else eveningDefaultCapacity
-                    val overflowPenalty = if (nextSlot > defaultCap) 20 else 0
-                    val loadPenalty = visitsInShift.size * 14
-                    val targetDistancePenalty = abs(dateIndex - targetIndex) * 3
-                    val shiftPenalty = if (shift == targetShift) 0 else 4
-                    val weekNumber = cycleCalculator.weekOfCycle(cycleCalculator.dayOfCycle(cycleStart, date))
-                    val sameCompanyWeekPenalty = if (occupied.any { it.companyId == companyId && it.weekOfCycle == weekNumber }) 30 else 0
-                    SlotCandidate(
-                        date = date,
-                        shift = shift,
-                        slotIndex = nextSlot,
-                        score = loadPenalty + targetDistancePenalty + shiftPenalty + overflowPenalty + sameCompanyWeekPenalty,
+    private fun reconcileSingleCompany(matrix: HealthcareScheduler, company: Company): SchedulePlan {
+        val expectedVisits = company.tier.visitsPerCycle
+        val currentVisits = matrix.visitsForCompany(company.id)
+        return when {
+            currentVisits.size < expectedVisits -> SchedulePlan(
+                visitsToUpsert = matrix.allocateVisitsForCompany(company, expectedVisits - currentVisits.size),
+                visitsToSoftDelete = emptyList(),
+            )
+            currentVisits.size > expectedVisits -> SchedulePlan(
+                visitsToUpsert = emptyList(),
+                visitsToSoftDelete = matrix.downgradeCompanyVisits(company.id, currentVisits.size - expectedVisits),
+            )
+            else -> SchedulePlan(emptyList(), emptyList())
+        }
+    }
+
+    data class ScheduledVisit(
+        val dayIndex: Int, // 1..20 working day index, not calendar day-of-cycle
+        val isEvening: Boolean,
+    )
+
+    /** Matrix implementation requested by the administrator. */
+    class HealthcareScheduler(
+        private val cycleStart: LocalDate,
+        existingVisits: List<Visit>,
+        private val cycleCalculator: CycleCalculator = CycleCalculator(),
+        private val absoluteCellMax: Int = 10,
+    ) {
+        private val workingDates: List<LocalDate> = cycleCalculator.workingDatesInCycle(cycleStart).take(20)
+        private val dateToWorkingDayIndex: Map<LocalDate, Int> = workingDates.mapIndexed { index, date -> date to index + 1 }.toMap()
+        private val globalGrid: MutableMap<CellKey, MutableList<Visit>> = mutableMapOf()
+
+        init {
+            for (day in 1..20) {
+                globalGrid[CellKey(day, false)] = mutableListOf()
+                globalGrid[CellKey(day, true)] = mutableListOf()
+            }
+
+            existingVisits
+                .filterNot { it.isDeleted }
+                .filter { it.cycleStartEpochDay == cycleStart.toEpochDay() }
+                .sortedWith(compareBy<Visit> { it.date }.thenBy { it.shift.ordinal }.thenBy { it.slotIndex })
+                .forEach { visit ->
+                    val dayIndex = dateToWorkingDayIndex[visit.date] ?: return@forEach
+                    val key = CellKey(dayIndex, visit.shift == Shift.EVENING)
+                    globalGrid[key]?.add(visit)
+                }
+        }
+
+        fun visitsForCompany(companyId: String): List<Visit> = globalGrid.values
+            .flatten()
+            .filter { it.companyId == companyId }
+            .sortedWith(compareBy<Visit> { workingDayIndex(it) }.thenBy { it.shift.ordinal }.thenBy { it.slotIndex })
+
+        fun allocateVisitsForCompany(company: Company, requiredNewVisits: Int): List<Visit> {
+            val allocated = mutableListOf<Visit>()
+            repeat(requiredNewVisits) {
+                val bestCell = bestCellForCompany(company.id) ?: return@repeat
+                val date = workingDates[bestCell.dayIndex - 1]
+                val shift = if (bestCell.isEvening) Shift.EVENING else Shift.MORNING
+                val slotIndex = firstVacantSlot(globalGrid[bestCell].orEmpty().map { it.slotIndex }.toSet())
+                    ?: return@repeat
+                val calendarDayOfCycle = cycleCalculator.dayOfCycle(cycleStart, date)
+                val visit = Visit(
+                    id = stableVisitId(company.id, cycleStart.toEpochDay(), bestCell.dayIndex, bestCell.isEvening, slotIndex),
+                    companyId = company.id,
+                    cycleStartEpochDay = cycleStart.toEpochDay(),
+                    dayOfCycle = calendarDayOfCycle,
+                    weekOfCycle = cycleCalculator.weekOfCycle(calendarDayOfCycle),
+                    date = date,
+                    shift = shift,
+                    slotIndex = slotIndex,
+                )
+                globalGrid[bestCell]?.add(visit)
+                globalGrid[bestCell]?.sortBy { it.slotIndex }
+                allocated += visit
+            }
+            return allocated
+        }
+
+        fun downgradeCompanyVisits(companyId: String, visitsToRemove: Int): List<Visit> {
+            val removed = mutableListOf<Visit>()
+            repeat(visitsToRemove) {
+                val candidate = visitsForCompany(companyId)
+                    .mapNotNull { visit ->
+                        val key = cellKeyForVisit(visit) ?: return@mapNotNull null
+                        VisitRemovalCandidate(
+                            visit = visit,
+                            key = key,
+                            weight = cellWeight(key),
+                        )
+                    }
+                    .maxWithOrNull(
+                        compareBy<VisitRemovalCandidate> { it.weight }
+                            .thenBy { it.key.isEvening } // evening usually carries the higher default load
+                            .thenBy { it.key.dayIndex }
+                            .thenBy { it.visit.slotIndex }
+                    ) ?: return@repeat
+
+                globalGrid[candidate.key]?.removeAll { it.id == candidate.visit.id }
+                removed += candidate.visit
+            }
+            return removed
+        }
+
+        fun deleteCompanyCompletely(companyId: String): List<Visit> {
+            val removed = mutableListOf<Visit>()
+            globalGrid.forEach { (_, visits) ->
+                val matching = visits.filter { it.companyId == companyId }
+                if (matching.isNotEmpty()) {
+                    removed += matching
+                    visits.removeAll { it.companyId == companyId }
+                }
+            }
+            return removed
+        }
+
+        private fun bestCellForCompany(companyId: String): CellKey? {
+            val companyVisits = visitsForCompany(companyId)
+            val occupiedDays = companyVisits.mapNotNull { workingDayIndex(it) }.toSet()
+            val occupiedWeeks = companyVisits.map { it.weekOfCycle }.toSet()
+
+            val candidates = (1..20).flatMap { day ->
+                listOf(false, true).mapNotNull { isEvening ->
+                    if (day in occupiedDays) return@mapNotNull null
+                    val key = CellKey(day, isEvening)
+                    if (cellWeight(key) >= absoluteCellMax) return@mapNotNull null
+                    val week = ((day - 1) / 5) + 1
+                    CellCandidate(
+                        key = key,
+                        weight = cellWeight(key),
+                        week = week,
+                        hasDifferentWeekPriority = week !in occupiedWeeks,
                     )
                 }
             }
+            if (candidates.isEmpty()) return null
+
+            val preferredWeekCandidates = candidates.filter { it.hasDifferentWeekPriority }
+                .takeIf { it.isNotEmpty() }
+                ?: candidates
+
+            return preferredWeekCandidates
+                .minWithOrNull(
+                    compareBy<CellCandidate> { it.weight }
+                        .thenBy { it.key.isEvening } // false/morning first, then true/evening
+                        .thenBy { it.week }
+                        .thenBy { it.key.dayIndex }
+                )
+                ?.key
         }
 
-        return candidates.minWithOrNull(compareBy<SlotCandidate> { it.score }.thenBy { it.date }.thenBy { it.shift.ordinal })
-            ?: throw IllegalStateException("No available Borg Pharmacy schedule slots; dynamic capacity $dynamicCapacity was exhausted")
+        private fun cellWeight(key: CellKey): Int = globalGrid[key]?.size ?: 0
+
+        private fun cellKeyForVisit(visit: Visit): CellKey? {
+            val day = workingDayIndex(visit) ?: return null
+            return CellKey(day, visit.shift == Shift.EVENING)
+        }
+
+        private fun workingDayIndex(visit: Visit): Int? = dateToWorkingDayIndex[visit.date]
+
+        private fun firstVacantSlot(usedSlots: Set<Int>): Int? = (1..absoluteCellMax).firstOrNull { it !in usedSlots }
+
+        private fun stableVisitId(
+            companyId: String,
+            cycleStartEpochDay: Long,
+            dayIndex: Int,
+            isEvening: Boolean,
+            slotIndex: Int,
+        ): String = UUID.nameUUIDFromBytes(
+            "$companyId-$cycleStartEpochDay-matrix-$dayIndex-$isEvening-$slotIndex".toByteArray(),
+        ).toString()
     }
-
-    private fun targetWorkingDateIndex(companyId: String, visitNumber: Int, expectedVisits: Int, workingDays: Int): Int {
-        if (workingDays <= 1) return 0
-        val visitCount = expectedVisits.coerceAtLeast(1)
-        val segmentStart = ((visitNumber - 1) * workingDays) / visitCount
-        val segmentExclusiveEnd = (visitNumber * workingDays) / visitCount
-        val span = (segmentExclusiveEnd - segmentStart).coerceAtLeast(1)
-        val offset = abs(stableHash("$companyId-$visitNumber-date")) % span
-        return (segmentStart + offset).coerceIn(0, workingDays - 1)
-    }
-
-    private fun targetShift(companyId: String, visitNumber: Int): Shift =
-        if (abs(stableHash("$companyId-$visitNumber-shift")) % 2 == 0) Shift.MORNING else Shift.EVENING
-
-    private fun stableHash(value: String): Int = value.fold(0) { acc, char -> (acc * 31) + char.code } and Int.MAX_VALUE
-
-    private fun stableVisitId(companyId: String, cycleStartEpoch: Long, visitNumber: Int): String =
-        UUID.nameUUIDFromBytes("$companyId-$cycleStartEpoch-$visitNumber".toByteArray()).toString()
 }
 
 data class SchedulePlan(
@@ -166,9 +258,20 @@ data class SchedulePlan(
     val visitsToSoftDelete: List<Visit>,
 )
 
-private data class SlotCandidate(
-    val date: LocalDate,
-    val shift: Shift,
-    val slotIndex: Int,
-    val score: Int,
+private data class CellKey(
+    val dayIndex: Int,
+    val isEvening: Boolean,
+)
+
+private data class CellCandidate(
+    val key: CellKey,
+    val weight: Int,
+    val week: Int,
+    val hasDifferentWeekPriority: Boolean,
+)
+
+private data class VisitRemovalCandidate(
+    val visit: Visit,
+    val key: CellKey,
+    val weight: Int,
 )
