@@ -9,23 +9,24 @@ class ScheduleGeneratorTest {
     private val start = LocalDate.of(2026, 7, 4) // Saturday 04 July, fixed Borg baseline
 
     @Test
-    fun newCompanyReceivesOneMasterSlotRepeatedAcrossFourWeeks() {
+    fun newCompanyReceivesFourOrthogonalVisits() {
         val company = Company(id = "c1", name = "Alpha", tier = Tier.UNRATED)
         val plan = ScheduleGenerator().reconcile(start, listOf(company), emptyList())
         assertEquals(4, plan.visitsToUpsert.size)
         assertEquals(setOf(1, 2, 3, 4), plan.visitsToUpsert.map { it.weekOfCycle }.toSet())
-        assertEquals(1, plan.visitsToUpsert.map { it.shift }.distinct().size)
-        assertEquals(1, plan.visitsToUpsert.map { ((it.dayOfCycle - 1) % 7) }.distinct().size)
+        assertEquals(4, plan.visitsToUpsert.map { ((it.dayOfCycle - 1) % 7) }.distinct().size)
+        assertEquals(2, plan.visitsToUpsert.count { it.shift == Shift.MORNING })
+        assertEquals(2, plan.visitsToUpsert.count { it.shift == Shift.EVENING })
     }
 
     @Test
-    fun openCapacityBalancesAcrossTenMasterSlots() {
+    fun openCapacityBalancesWeekOneAcrossTenBaseSlots() {
         val companies = (1..130).map { Company(id = "c$it", name = "Company $it", tier = Tier.UNRATED) }
         val plan = ScheduleGenerator().reconcile(start, companies, emptyList())
         assertEquals(520, plan.visitsToUpsert.size)
         val weekOneLoads = plan.visitsToUpsert
             .filter { it.weekOfCycle == 1 }
-            .groupBy { it.date to it.shift }
+            .groupBy { ((it.dayOfCycle - 1) % 7) to it.shift }
             .values
             .map { it.size }
         assertEquals(10, weekOneLoads.size)
@@ -42,7 +43,7 @@ class ScheduleGeneratorTest {
     }
 
     @Test
-    fun existingAssignmentIsLockedAndMissingWeeksAreFilledOnly() {
+    fun existingWeekOneBaseAssignmentIsLockedAndCompleted() {
         val company = Company(id = "target", name = "Target", tier = Tier.A)
         val existing = Visit(
             id = "v1",
@@ -56,8 +57,10 @@ class ScheduleGeneratorTest {
         )
         val plan = ScheduleGenerator().reconcileSingleCompany(start, company, listOf(existing))
         assertEquals(3, plan.visitsToUpsert.size)
-        assertTrue(plan.visitsToUpsert.all { it.shift == Shift.MORNING })
-        assertTrue(plan.visitsToUpsert.all { ((it.dayOfCycle - 1) % 7) == 0 })
-        assertEquals(0, plan.visitsToSoftDelete.size)
+        val finalVisits = listOf(existing) + plan.visitsToUpsert
+        assertEquals(setOf(1, 2, 3, 4), finalVisits.map { it.weekOfCycle }.toSet())
+        assertEquals(4, finalVisits.map { ((it.dayOfCycle - 1) % 7) }.distinct().size)
+        assertEquals(2, finalVisits.count { it.shift == Shift.MORNING })
+        assertEquals(2, finalVisits.count { it.shift == Shift.EVENING })
     }
 }

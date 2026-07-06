@@ -73,7 +73,6 @@ class MainActivity : ComponentActivity() {
                 onAddCompany = viewModel::addCompany,
                 onImportCsv = { csvLauncher.launch("text/*") },
                 onExportCompanies = { format -> exportCompanies(format, state.companies) },
-                onSaveTierChanges = viewModel::saveTierChanges,
                 onUpdateCompanyName = viewModel::updateCompanyName,
                 onDeleteCompany = viewModel::deleteCompany,
                 onAddRepresentative = viewModel::addRepresentative,

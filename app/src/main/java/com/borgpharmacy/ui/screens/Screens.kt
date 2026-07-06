@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
@@ -121,7 +120,6 @@ private enum class Route(val label: String, val icon: ImageVector) {
     HOME("اليوم", Icons.Default.Home),
     WEEKLY("الأسابيع", Icons.Default.CalendarMonth),
     COMPANIES("الشركات", Icons.Default.Business),
-    EVALUATION("التقييم", Icons.Default.Edit),
     ENQUIRIES("التواصل", Icons.Default.Send),
     DASHBOARD("التقارير", Icons.Default.Assessment),
     SETTINGS("الإعدادات", Icons.Default.Settings),
@@ -136,7 +134,6 @@ fun BorgApp(
     onAddCompany: (String) -> Unit,
     onImportCsv: () -> Unit,
     onExportCompanies: (String) -> Unit,
-    onSaveTierChanges: (Map<String, Tier>) -> Unit,
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
@@ -209,7 +206,6 @@ fun BorgApp(
                     onDeleteRepresentative = onDeleteRepresentative,
                     modifier = contentModifier,
                 )
-                Route.EVALUATION -> EvaluationScreen(state, onImportCsv, onSaveTierChanges, contentModifier)
                 Route.ENQUIRIES -> EnquiriesScreen(state, onWhatsApp, contentModifier)
                 Route.DASHBOARD -> DashboardScreen(state, contentModifier)
                 Route.SETTINGS -> SettingsScreen(
@@ -243,7 +239,7 @@ private fun BorgTopBar(state: BorgUiState, onLogout: () -> Unit) {
                 Column {
                     Text("صيدلية برج الأطباء", fontWeight = FontWeight.ExtraBold, color = DeepNavy)
                     Text(
-                        "الدورة الحالية: $cycleMonth - الأسبوع ${state.cycleInfo.weekOfCycle} • التاريخ الفعلي: ${state.cycleInfo.today.format(shortDateFormatter)}",
+                        "الدورة الحالية: $cycleMonth - الأسبوع ${state.cycleInfo.weekOfCycle} [شبكة تدوير عادلة] • التاريخ الفعلي: ${state.cycleInfo.today.format(shortDateFormatter)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF526070),
                         maxLines = 2,
@@ -769,92 +765,6 @@ private fun CompanyProfileCard(
                     OutlinedTextField(value = repPhone, onValueChange = { repPhone = it }, label = { Text("الهاتف") }, enabled = state.isAdmin, modifier = Modifier.weight(1f))
                     IconButton(onClick = { onAddRepresentative(company.id, repName, repPhone); repName = ""; repPhone = "+967" }, enabled = state.isAdmin) { Icon(Icons.Default.Save, null, tint = BorgBlue) }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EvaluationScreen(
-    state: BorgUiState,
-    onImportCsv: () -> Unit,
-    onSaveTierChanges: (Map<String, Tier>) -> Unit,
-    modifier: Modifier,
-) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var editMode by rememberSaveable { mutableStateOf(false) }
-    var pendingTiers by remember { mutableStateOf<Map<String, Tier>>(emptyMap()) }
-    val filtered = state.companies.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
-    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            HeaderCard(
-                "تقييم الشركات والتصنيف",
-                "تعديل التقييم لا يعيد توزيع الجدول. ترتيب الجدول خط أحمر: يتم فقط حذف زيارة زائدة أو إضافة زيارة في أقل فترة متاحة.",
-                listOf(BorgRed, Color(0xFFE35B6D)),
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!editMode) {
-                    Button(
-                        onClick = {
-                            pendingTiers = state.companies.associate { it.id to it.tier }
-                            editMode = true
-                        },
-                        enabled = state.isAdmin,
-                    ) {
-                        Icon(Icons.Default.Edit, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("تعديل التقييم")
-                    }
-                } else {
-                    Button(
-                        onClick = {
-                            val changedTiers = state.companies.mapNotNull { company ->
-                                val newTier = pendingTiers[company.id] ?: company.tier
-                                if (newTier != company.tier) company.id to newTier else null
-                            }.toMap()
-                            editMode = false
-                            pendingTiers = emptyMap()
-                            onSaveTierChanges(changedTiers)
-                        },
-                        enabled = state.isAdmin,
-                    ) {
-                        Icon(Icons.Default.Save, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("حفظ التعديلات")
-                    }
-                    OutlinedButton(onClick = { editMode = false; pendingTiers = emptyMap() }) { Text("إلغاء") }
-                }
-                OutlinedButton(onClick = onImportCsv, enabled = state.isAdmin) { Text("استيراد CSV") }
-            }
-            Spacer(Modifier.height(8.dp))
-            SearchBox(query, { query = it }, "ابحث للتقييم")
-        }
-        items(filtered, key = { it.id }) { company ->
-            val displayedTier = pendingTiers[company.id] ?: company.tier
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
-                        Text("عدد الزيارات المتوقعة: ${displayedTier.visitsPerCycle}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
-                    }
-                    TierDropdown(displayedTier, enabled = state.isAdmin && editMode) { tier ->
-                        pendingTiers = pendingTiers + (company.id to tier)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TierDropdown(selected: Tier, enabled: Boolean, onSelected: (Tier) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled) { Text(selected.arabicLabel()) }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            listOf(Tier.A, Tier.B, Tier.C, Tier.UNRATED).forEach { tier ->
-                DropdownMenuItem(text = { Text(tier.arabicLabel()) }, onClick = { onSelected(tier); expanded = false })
             }
         }
     }

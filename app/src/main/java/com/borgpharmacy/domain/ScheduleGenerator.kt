@@ -4,15 +4,19 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Open-capacity cyclic scheduler for Borg Pharmacy.
+ * Orthogonal Rotation cyclic scheduler for Borg Pharmacy.
  *
- * Model:
- * - Week 1 is the master board: 5 working days x 2 shifts = 10 master cells.
- * - Every company is assigned once to one master cell.
- * - The same assignment is repeated automatically in Weeks 2, 3 and 4.
- * - There is no maximum cell capacity; new companies go to the least-loaded master cell.
- * - Red line: existing company assignments are never shuffled. We only add missing occurrences,
- *   remove a deleted company, or create a master assignment for a new company.
+ * The schedule has a Week-1 master blueprint (5 working days × 2 shifts = 10 base cells).
+ * Each company is locked to one base cell forever unless deleted. The 4-week cycle is generated
+ * from that base cell using deterministic orthogonal rotation:
+ *
+ * Week 1: base day + 0, base shift
+ * Week 2: base day + 1, inverted shift
+ * Week 3: base day + 2, base shift
+ * Week 4: base day + 3, inverted shift
+ *
+ * This gives every company exactly four visits per cycle, across four different working days,
+ * and exactly two morning + two evening visits. No automatic shuffling of locked companies occurs.
  */
 class ScheduleGenerator(
     private val cycleCalculator: CycleCalculator = CycleCalculator(),
@@ -22,7 +26,7 @@ class ScheduleGenerator(
         companies: List<Company>,
         existingVisits: List<Visit>,
     ): SchedulePlan {
-        val scheduler = OpenCapacityCyclicScheduler(cycleStart, existingVisits, cycleCalculator)
+        val scheduler = OrthogonalRotationScheduler(cycleStart, existingVisits, cycleCalculator)
         val activeCompanies = companies.filterNot { it.isDeleted }
         val activeIds = activeCompanies.map { it.id }.toSet()
 
@@ -35,17 +39,20 @@ class ScheduleGenerator(
             .map { it.companyId }
             .distinct()
             .filter { it !in activeIds }
-            .forEach { deletes += scheduler.deleteCompanyCompletely(it) }
+            .forEach { companyId -> deletes += scheduler.deleteCompanyCompletely(companyId) }
 
         activeCompanies
             .sortedWith(compareBy<Company> { it.name.lowercase() }.thenBy { it.id })
             .forEach { company ->
-                val plan = scheduler.ensureCompanyRecurringSchedule(company)
+                val plan = scheduler.ensureCompanyRotation(company)
                 deletes += plan.visitsToSoftDelete
                 upserts += plan.visitsToUpsert
             }
 
-        return SchedulePlan(upserts.distinctBy { it.id }, deletes.distinctBy { it.id })
+        return SchedulePlan(
+            visitsToUpsert = upserts.distinctBy { it.id },
+            visitsToSoftDelete = deletes.distinctBy { it.id },
+        )
     }
 
     fun reconcileSingleCompany(
@@ -53,8 +60,8 @@ class ScheduleGenerator(
         company: Company,
         existingVisits: List<Visit>,
     ): SchedulePlan {
-        val scheduler = OpenCapacityCyclicScheduler(cycleStart, existingVisits, cycleCalculator)
-        return scheduler.ensureCompanyRecurringSchedule(company)
+        val scheduler = OrthogonalRotationScheduler(cycleStart, existingVisits, cycleCalculator)
+        return scheduler.ensureCompanyRotation(company)
     }
 
     fun deleteCompanyVisits(
@@ -62,54 +69,49 @@ class ScheduleGenerator(
         companyId: String,
         existingVisits: List<Visit>,
     ): SchedulePlan {
-        val scheduler = OpenCapacityCyclicScheduler(cycleStart, existingVisits, cycleCalculator)
+        val scheduler = OrthogonalRotationScheduler(cycleStart, existingVisits, cycleCalculator)
         return SchedulePlan(emptyList(), scheduler.deleteCompanyCompletely(companyId))
     }
 
-    class OpenCapacityCyclicScheduler(
+    class OrthogonalRotationScheduler(
         private val cycleStart: LocalDate,
         existingVisits: List<Visit>,
         private val cycleCalculator: CycleCalculator = CycleCalculator(),
     ) {
         private val workingDates: List<LocalDate> = cycleCalculator.workingDatesInCycle(cycleStart).take(20)
         private val dateToWorkingIndex: Map<LocalDate, Int> = workingDates.mapIndexed { index, date -> date to index + 1 }.toMap()
-        private val grid: MutableMap<MasterCell, MutableList<Visit>> = mutableMapOf()
+        private val grid: MutableMap<BaseCell, MutableList<Visit>> = mutableMapOf()
 
         init {
-            for (day in 1..5) {
-                grid[MasterCell(day, Shift.MORNING)] = mutableListOf()
-                grid[MasterCell(day, Shift.EVENING)] = mutableListOf()
+            for (day in 0..4) {
+                grid[BaseCell(day, Shift.MORNING)] = mutableListOf()
+                grid[BaseCell(day, Shift.EVENING)] = mutableListOf()
             }
             existingVisits
                 .filterNot { it.isDeleted }
                 .filter { it.cycleStartEpochDay == cycleStart.toEpochDay() }
                 .sortedWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal }.thenBy { it.slotIndex })
                 .forEach { visit ->
-                    val cell = masterCellForVisit(visit) ?: return@forEach
-                    grid[cell]?.add(visit)
+                    val baseCell = inferBaseCell(visit) ?: return@forEach
+                    grid[baseCell]?.add(visit)
                 }
         }
 
-        fun ensureCompanyRecurringSchedule(company: Company): SchedulePlan {
+        fun ensureCompanyRotation(company: Company): SchedulePlan {
             val current = visitsForCompany(company.id)
-            val assignment = lockedAssignmentForCompany(company.id) ?: chooseLightestMasterCell()
-            val deletes = current.filter { masterCellForVisit(it) != assignment }
-            val kept = current.filterNot { visit -> deletes.any { it.id == visit.id } }
-            val upserts = mutableListOf<Visit>()
+            val baseCell = lockedBaseCellForCompany(company.id) ?: chooseLeastLoadedBaseCell()
+            val desired = (1..4).map { week -> createVisit(company.id, baseCell, week) }
+            val desiredKeys = desired.map { visitKey(it) }.toSet()
+            val currentKeys = current.map { visitKey(it) }.toSet()
 
-            for (week in 1..4) {
-                val alreadyExists = kept.any { it.weekOfCycle == week && masterCellForVisit(it) == assignment }
-                if (alreadyExists) continue
-                val slotIndex = legacySlotIndexForWeek(assignment, week)
-                upserts += createVisit(company.id, assignment, week, slotIndex)
-            }
+            val deletes = current.filter { visitKey(it) !in desiredKeys }
+            val upserts = desired.filter { visitKey(it) !in currentKeys }
 
-            // Update in-memory grid so a batch operation can add many companies without seeing stale loads.
             deletes.forEach { removed ->
-                masterCellForVisit(removed)?.let { cell -> grid[cell]?.removeAll { it.id == removed.id } }
+                inferBaseCell(removed)?.let { cell -> grid[cell]?.removeAll { it.id == removed.id } }
             }
-            upserts.forEach { added -> grid[assignment]?.add(added) }
-            grid[assignment]?.sortWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.slotIndex })
+            upserts.forEach { added -> grid[baseCell]?.add(added) }
+            grid[baseCell]?.sortWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.slotIndex }.thenBy { it.companyId })
 
             return SchedulePlan(upserts, deletes)
         }
@@ -129,59 +131,66 @@ class ScheduleGenerator(
         private fun visitsForCompany(companyId: String): List<Visit> = grid.values
             .flatten()
             .filter { it.companyId == companyId }
+            .distinctBy { it.id }
             .sortedWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal }.thenBy { it.slotIndex })
 
-        private fun lockedAssignmentForCompany(companyId: String): MasterCell? = visitsForCompany(companyId)
+        private fun lockedBaseCellForCompany(companyId: String): BaseCell? = visitsForCompany(companyId)
             .firstOrNull { it.weekOfCycle == 1 }
-            ?.let { masterCellForVisit(it) }
-            ?: visitsForCompany(companyId).firstOrNull()?.let { masterCellForVisit(it) }
+            ?.let { inferBaseCell(it) }
+            ?: visitsForCompany(companyId).firstOrNull()?.let { inferBaseCell(it) }
 
-        private fun chooseLightestMasterCell(): MasterCell = (1..5)
-            .flatMap { day -> listOf(MasterCell(day, Shift.MORNING), MasterCell(day, Shift.EVENING)) }
-            .minWith(compareBy<MasterCell> { uniqueCompaniesInCell(it) }.thenBy { it.shift.ordinal }.thenBy { it.dayOfWeekOne })
+        private fun chooseLeastLoadedBaseCell(): BaseCell = (0..4)
+            .flatMap { day -> listOf(BaseCell(day, Shift.MORNING), BaseCell(day, Shift.EVENING)) }
+            .minWith(compareBy<BaseCell> { uniqueCompaniesInCell(it) }.thenBy { it.dayIndex }.thenBy { it.baseShift.ordinal })
 
-        private fun uniqueCompaniesInCell(cell: MasterCell): Int = grid[cell].orEmpty().map { it.companyId }.distinct().size
+        private fun uniqueCompaniesInCell(cell: BaseCell): Int = grid[cell].orEmpty().map { it.companyId }.distinct().size
 
-        private fun masterCellForVisit(visit: Visit): MasterCell? {
+        private fun inferBaseCell(visit: Visit): BaseCell? {
             val workingIndex = dateToWorkingIndex[visit.date] ?: return null
-            val dayInMasterWeek = ((workingIndex - 1) % 5) + 1
-            return MasterCell(dayInMasterWeek, visit.shift)
+            val week = visit.weekOfCycle.coerceIn(1, 4)
+            val dayWithinWeek = (workingIndex - 1) % 5 // 0..4
+            val offset = week - 1
+            val baseDay = Math.floorMod(dayWithinWeek - offset, 5)
+            val baseShift = if (week == 2 || week == 4) visit.shift.inverted() else visit.shift
+            return BaseCell(baseDay, baseShift)
         }
 
-        private fun legacySlotIndexForWeek(cell: MasterCell, week: Int): Int {
-            // Supabase legacy schema stores slot_index with a 1..10 check. In the open-capacity
-            // model, capacity is unlimited, so this field is kept only as a display/order hint.
-            // Multiple companies may share the same legacy slot index after the tenth item.
-            val count = grid[cell].orEmpty().count { it.weekOfCycle == week }
-            return (count % 10) + 1
+        private fun rotatedCell(baseCell: BaseCell, week: Int): RotatedCell {
+            val offset = week - 1
+            val day = (baseCell.dayIndex + offset) % 5
+            val shift = if (week == 2 || week == 4) baseCell.baseShift.inverted() else baseCell.baseShift
+            return RotatedCell(day, shift)
         }
 
-        private fun createVisit(companyId: String, cell: MasterCell, week: Int, slotIndex: Int): Visit {
-            val workingIndex = ((week - 1) * 5) + cell.dayOfWeekOne
+        private fun createVisit(companyId: String, baseCell: BaseCell, week: Int): Visit {
+            val rotated = rotatedCell(baseCell, week)
+            val workingIndex = ((week - 1) * 5) + rotated.dayIndex + 1
             val date = workingDates[workingIndex - 1]
             val dayOfCycle = cycleCalculator.dayOfCycle(cycleStart, date)
+            val slotIndex = legacySlotIndex(baseCell)
             return Visit(
-                id = stableVisitId(companyId, cycleStart.toEpochDay(), cell.dayOfWeekOne, cell.shift, week, slotIndex),
+                id = stableVisitId(companyId, cycleStart.toEpochDay(), week),
                 companyId = companyId,
                 cycleStartEpochDay = cycleStart.toEpochDay(),
                 dayOfCycle = dayOfCycle,
                 weekOfCycle = week,
                 date = date,
-                shift = cell.shift,
+                shift = rotated.shift,
                 slotIndex = slotIndex,
             )
         }
 
-        private fun stableVisitId(
-            companyId: String,
-            cycleStartEpochDay: Long,
-            day: Int,
-            shift: Shift,
-            week: Int,
-            slotIndex: Int,
-        ): String = UUID.nameUUIDFromBytes(
-            "$companyId-$cycleStartEpochDay-open-week-template-$day-${shift.name}-$week-$slotIndex".toByteArray(),
-        ).toString()
+        private fun legacySlotIndex(baseCell: BaseCell): Int {
+            // Supabase deployments may still have the historical 1..10 slot_index constraint.
+            // Open capacity is represented by allowing many companies to share the same display hint.
+            val ordinal = uniqueCompaniesInCell(baseCell) + 1
+            return ((ordinal - 1) % 10) + 1
+        }
+
+        private fun visitKey(visit: Visit): String = "${visit.companyId}|${visit.weekOfCycle}|${visit.date.toEpochDay()}|${visit.shift.name}"
+
+        private fun stableVisitId(companyId: String, cycleStartEpochDay: Long, week: Int): String =
+            UUID.nameUUIDFromBytes("$companyId-$cycleStartEpochDay-orthogonal-week-$week".toByteArray()).toString()
     }
 }
 
@@ -190,7 +199,17 @@ data class SchedulePlan(
     val visitsToSoftDelete: List<Visit>,
 )
 
-private data class MasterCell(
-    val dayOfWeekOne: Int, // 1..5 = Sat..Wed in the master week
+private data class BaseCell(
+    val dayIndex: Int, // 0..4 = Sat..Wed in Week 1 master blueprint
+    val baseShift: Shift,
+)
+
+private data class RotatedCell(
+    val dayIndex: Int,
     val shift: Shift,
 )
+
+private fun Shift.inverted(): Shift = when (this) {
+    Shift.MORNING -> Shift.EVENING
+    Shift.EVENING -> Shift.MORNING
+}

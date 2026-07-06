@@ -29,9 +29,10 @@ class WhatsAppMessenger(private val context: Context) {
         val itinerary = if (visits.isEmpty()) {
             "لا توجد زيارات مجدولة حاليًا."
         } else {
-            val first = visits.sortedWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal }).first()
-            val dates = visits.sortedBy { it.date }.joinToString("، ") { it.date.format(formatter) }
-            "الموعد الثابت المتكرر: كل ${first.date.dayOfWeek.borgArabicName()} - ${first.shift.arabicName} في برج الأطباء.\nتواريخ الدورة الحالية: $dates"
+            visits.sortedWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal })
+                .joinToString("\n") { visit ->
+                    "- الأسبوع ${visit.weekOfCycle}: ${visit.date.format(formatter)} (${visit.date.dayOfWeek.borgArabicName()}) - ${visit.shift.arabicName}"
+                }
         }
         return """
             صيدلية برج الأطباء - إدارة الصيدلية
