@@ -11,6 +11,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      BORG_KEYSTORE_BASE64: ${{ secrets.BORG_KEYSTORE_BASE64 }}
+      BORG_KEYSTORE_PASSWORD: ${{ secrets.BORG_KEYSTORE_PASSWORD }}
+      BORG_KEY_ALIAS: ${{ secrets.BORG_KEY_ALIAS }}
+      BORG_KEY_PASSWORD: ${{ secrets.BORG_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,17 +35,20 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Decode release keystore if secrets exist
-        if: ${{ secrets.BORG_KEYSTORE_BASE64 != '' }}
+      - name: Decode release keystore when repository secrets exist
         run: |
-          mkdir -p keystore
-          echo "${{ secrets.BORG_KEYSTORE_BASE64 }}" | base64 --decode > keystore/borg-release.jks
-          cat > keystore.properties <<EOF
+          if [ -n "$BORG_KEYSTORE_BASE64" ]; then
+            mkdir -p keystore
+            printf '%s' "$BORG_KEYSTORE_BASE64" | base64 --decode > keystore/borg-release.jks
+            cat > keystore.properties <<EOF
           storeFile=keystore/borg-release.jks
-          storePassword=${{ secrets.BORG_KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.BORG_KEY_ALIAS }}
-          keyPassword=${{ secrets.BORG_KEY_PASSWORD }}
+          storePassword=$BORG_KEYSTORE_PASSWORD
+          keyAlias=$BORG_KEY_ALIAS
+          keyPassword=$BORG_KEY_PASSWORD
           EOF
+          else
+            echo "Release signing secrets are not configured; Gradle will use debug signing fallback for CI artifact only."
+          fi
 
       - name: Build release APK
         run: ./gradlew clean assembleRelease --stacktrace
