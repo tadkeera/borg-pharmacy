@@ -28,7 +28,7 @@ create table if not exists public.visits (
   week_of_cycle int not null check (week_of_cycle between 1 and 4),
   date_epoch_day bigint not null,
   shift text not null check (shift in ('MORNING', 'EVENING')),
-  slot_index int not null check (slot_index between 1 and 10),
+  slot_index int not null,
   status text not null default 'SCHEDULED',
   created_at bigint not null,
   updated_at bigint not null,

@@ -135,6 +135,7 @@ fun BorgApp(
     onLogout: () -> Unit,
     onAddCompany: (String) -> Unit,
     onImportCsv: () -> Unit,
+    onExportCompanies: (String) -> Unit,
     onSaveTierChanges: (Map<String, Tier>) -> Unit,
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
@@ -201,6 +202,7 @@ fun BorgApp(
                     state = state,
                     onAddCompany = onAddCompany,
                     onImportCsv = onImportCsv,
+                    onExportCompanies = onExportCompanies,
                     onUpdateCompanyName = onUpdateCompanyName,
                     onDeleteCompany = onDeleteCompany,
                     onAddRepresentative = onAddRepresentative,
@@ -662,6 +664,7 @@ private fun CompanyProfilesScreen(
     state: BorgUiState,
     onAddCompany: (String) -> Unit,
     onImportCsv: () -> Unit,
+    onExportCompanies: (String) -> Unit,
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
@@ -681,6 +684,11 @@ private fun CompanyProfilesScreen(
                     Button(onClick = { onAddCompany(newCompany); newCompany = "" }, enabled = state.isAdmin) { Text("إضافة") }
                 }
                 OutlinedButton(onClick = onImportCsv, enabled = state.isAdmin) { Icon(Icons.Default.UploadFile, null); Spacer(Modifier.width(6.dp)); Text("استيراد CSV") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onExportCompanies("csv") }) { Text("تصدير CSV") }
+                    OutlinedButton(onClick = { onExportCompanies("pdf") }) { Text("تصدير PDF") }
+                    OutlinedButton(onClick = { onExportCompanies("html") }) { Text("تصدير HTML") }
+                }
                 if (query.length in 1..2) Text("اكتب 3 أحرف لعرض الاقتراحات الذكية.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
                 if (query.length >= 3) Text("تم العثور على ${filtered.size} نتيجة", style = MaterialTheme.typography.bodySmall, color = BorgBlue)
             }
@@ -897,9 +905,9 @@ private fun DashboardScreen(state: BorgUiState, modifier: Modifier) {
         item { HeaderCard("لوحة التحكم والتقارير", "إحصائيات فورية وتقارير الالتزام للفترة المحددة.", listOf(DeepNavy, BorgBlue)) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                CountCard("الفئة A", state.companies.count { it.tier == Tier.A }.toString(), BorgRed, Modifier.weight(1f))
-                CountCard("الفئة B", state.companies.count { it.tier == Tier.B }.toString(), BorgBlue, Modifier.weight(1f))
-                CountCard("الفئة C", state.companies.count { it.tier == Tier.C }.toString(), Color(0xFF2FA66A), Modifier.weight(1f))
+                CountCard("إجمالي الشركات", state.companies.size.toString(), BorgRed, Modifier.weight(1f))
+                CountCard("المندوبون", state.representatives.size.toString(), BorgBlue, Modifier.weight(1f))
+                CountCard("زيارات الدورة", state.visits.count { it.cycleStartEpochDay == state.cycleInfo.currentCycleStart.toEpochDay() }.toString(), Color(0xFF2FA66A), Modifier.weight(1f))
             }
         }
         item {

@@ -162,7 +162,12 @@ class OfflineFirstBorgRepository(
 
     override suspend fun addCompany(name: String): Company {
         val company = Company(name = name.trim().ifBlank { "شركة بدون اسم" })
-        db.companyDao().upsert(company.toEntity())
+        db.withTransaction {
+            db.companyDao().upsert(company.toEntity())
+            val visits = db.visitDao().listCycle(cycleStart().toEpochDay()).map { it.toDomain() }
+            val plan = scheduleGenerator.reconcileSingleCompany(cycleStart(), company, visits)
+            applySchedulePlan(plan)
+        }
         afterMutation("company")
         return company
     }
@@ -178,7 +183,14 @@ class OfflineFirstBorgRepository(
             .map { CompanyEntity(name = it) }
             .toList()
         if (rows.isNotEmpty()) {
-            db.companyDao().upsertAll(rows)
+            db.withTransaction {
+                db.companyDao().upsertAll(rows)
+                val start = cycleStart()
+                val companies = db.companyDao().search("").map { it.toDomain() }
+                val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+                val plan = scheduleGenerator.reconcile(start, companies, visits)
+                applySchedulePlan(plan)
+            }
             afterMutation("csv_import")
         }
         return rows.size
@@ -312,38 +324,39 @@ class OfflineFirstBorgRepository(
     private suspend fun ensureCurrentCycleSchedule(): Boolean {
         val start = cycleStart()
         val currentEpoch = start.toEpochDay()
-        if (db.visitDao().listCycle(currentEpoch).isNotEmpty()) return false
-
-        val companies = db.companyDao().search("").map { it.toDomain() }.filter { it.tier.visitsPerCycle > 0 }
+        val companies = db.companyDao().search("").map { it.toDomain() }
         if (companies.isEmpty()) return false
 
-        val templateEpoch = db.visitDao().latestCycleBefore(currentEpoch)
-        val candidateVisits = if (templateEpoch != null) {
-            val activeCompanyIds = companies.map { it.id }.toSet()
-            db.visitDao().listCycle(templateEpoch)
-                .map { it.toDomain() }
-                .filter { it.companyId in activeCompanyIds }
-                .map { template ->
-                    val date = start.plusDays((template.dayOfCycle - 1).toLong())
-                    template.copy(
-                        id = UUID.nameUUIDFromBytes("${template.companyId}-$currentEpoch-${template.dayOfCycle}-${template.shift}-${template.slotIndex}".toByteArray()).toString(),
-                        cycleStartEpochDay = currentEpoch,
-                        date = date,
-                        status = VisitStatus.SCHEDULED,
-                        createdAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis(),
-                        deletedAt = null,
-                    )
-                }
+        val currentVisits = db.visitDao().listCycle(currentEpoch).map { it.toDomain() }
+        val candidateVisits = if (currentVisits.isNotEmpty()) {
+            currentVisits
         } else {
-            emptyList()
+            val templateEpoch = db.visitDao().latestCycleBefore(currentEpoch)
+            if (templateEpoch != null) {
+                val activeCompanyIds = companies.map { it.id }.toSet()
+                db.visitDao().listCycle(templateEpoch)
+                    .map { it.toDomain() }
+                    .filter { it.companyId in activeCompanyIds }
+                    .map { template ->
+                        val date = start.plusDays((template.dayOfCycle - 1).toLong())
+                        template.copy(
+                            id = UUID.nameUUIDFromBytes("${template.companyId}-$currentEpoch-${template.dayOfCycle}-${template.shift}-${template.slotIndex}".toByteArray()).toString(),
+                            cycleStartEpochDay = currentEpoch,
+                            date = date,
+                            status = VisitStatus.SCHEDULED,
+                            createdAt = System.currentTimeMillis(),
+                            updatedAt = System.currentTimeMillis(),
+                            deletedAt = null,
+                        )
+                    }
+            } else {
+                emptyList()
+            }
         }
 
         val plan = scheduleGenerator.reconcile(start, companies, candidateVisits)
-        val deletedIds = plan.visitsToSoftDelete.map { it.id }.toSet()
-        val finalVisits = candidateVisits.filterNot { it.id in deletedIds } + plan.visitsToUpsert
-        if (finalVisits.isEmpty()) return false
-        db.visitDao().upsertAll(finalVisits.map { it.toEntity() })
+        if (plan.visitsToUpsert.isEmpty() && plan.visitsToSoftDelete.isEmpty()) return false
+        applySchedulePlan(plan)
         return true
     }
 
@@ -352,12 +365,12 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun dashboardScores(): List<CompanyReportScore> {
-        val companies = db.companyDao().search("").map { it.toDomain() }.filter { it.tier.visitsPerCycle > 0 }
+        val companies = db.companyDao().search("").map { it.toDomain() }
         val visits = db.visitDao().listCycle(cycleStart().toEpochDay()).map { it.toDomain() }
         return companies.map { company ->
-            val expected = company.tier.visitsPerCycle
+            val expected = 4
             val completed = visits.count { it.companyId == company.id && it.status == VisitStatus.COMPLETED }
-            val score = if (expected == 0) 0.0 else (completed.toDouble() / expected.toDouble()) * 10.0
+            val score = (completed.toDouble() / expected.toDouble()) * 10.0
             CompanyReportScore(company, expected, completed, score.coerceAtMost(10.0))
         }
     }
