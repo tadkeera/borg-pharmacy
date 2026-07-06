@@ -30,7 +30,7 @@ class WhatsAppMessenger(private val context: Context) {
             "لا توجد زيارات مجدولة حاليًا."
         } else {
             visits.sortedWith(compareBy<Visit> { it.date }.thenBy { it.shift.ordinal }).joinToString("\n") { visit ->
-                "- الأسبوع ${visit.weekOfCycle}, اليوم ${visit.dayOfCycle}: ${visit.date.format(formatter)} (${visit.date.dayOfWeek.borgArabicName()})، ${visit.shift.arabicName}"
+                "- الأسبوع ${visit.weekOfCycle}: ${visit.date.format(formatter)} (${visit.date.dayOfWeek.borgArabicName()})، ${visit.shift.arabicName}"
             }
         }
         return """

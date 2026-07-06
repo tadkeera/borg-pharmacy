@@ -88,12 +88,15 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun cycleStart(): LocalDate {
-        val key = "cycle_start_epoch_day"
-        val current = db.appSettingsDao().getValue(key)?.toLongOrNull()
-        if (current != null) return LocalDate.ofEpochDay(current)
-        val today = LocalDate.now()
-        db.appSettingsDao().set(AppSettingEntity(key, today.toEpochDay().toString()))
-        return today
+        // Borg Pharmacy fixed 28-day cycle anchor:
+        // Saturday 03 July is treated as Day 1 / Week 1. 2021 is the past year
+        // where 03 July was actually Saturday, and every 28-day cycle preserves
+        // the same Saturday-to-Friday weekly rhythm.
+        val fixedBaseline = LocalDate.of(2021, 7, 3)
+        val currentCycleStart = cycleCalculator.currentCycle(fixedBaseline, LocalDate.now()).currentCycleStart
+        db.appSettingsDao().set(AppSettingEntity("fixed_cycle_baseline_epoch_day", fixedBaseline.toEpochDay().toString()))
+        db.appSettingsDao().set(AppSettingEntity("current_cycle_start_epoch_day", currentCycleStart.toEpochDay().toString()))
+        return currentCycleStart
     }
 
     private suspend fun seedDefaultAdmin() {
@@ -134,7 +137,7 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun addCompany(name: String): Company {
-        val company = Company(name = name.trim().ifBlank { "Unnamed Company" })
+        val company = Company(name = name.trim().ifBlank { "شركة بدون اسم" })
         db.companyDao().upsert(company.toEntity())
         afterMutation("company")
         return company

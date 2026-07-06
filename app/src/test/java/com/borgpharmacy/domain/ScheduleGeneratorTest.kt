@@ -6,7 +6,7 @@ import org.junit.Test
 import java.time.LocalDate
 
 class ScheduleGeneratorTest {
-    private val start = LocalDate.of(2026, 7, 4) // Saturday
+    private val start = LocalDate.of(2021, 7, 3) // Saturday 03 July, fixed Borg baseline
 
     @Test
     fun tierAReceivesThreeVisits() {
@@ -27,10 +27,19 @@ class ScheduleGeneratorTest {
     }
 
     @Test
-    fun overflowNeverExceedsTenPerShift() {
+    fun ordinaryLoadStaysWithinClassicOverflowCapacity() {
         val companies = (1..70).map { Company(id = "c$it", name = "Company $it", tier = Tier.A) }
         val plan = ScheduleGenerator().reconcile(start, companies, emptyList())
         val maxLoad = plan.visitsToUpsert.groupBy { it.date to it.shift }.maxOf { it.value.size }
         assertTrue(maxLoad <= 10)
+    }
+
+    @Test
+    fun veryLargeCompanyListIsDistributedWithoutFailure() {
+        val companies = (1..450).map { Company(id = "c$it", name = "Company $it", tier = Tier.C) }
+        val plan = ScheduleGenerator().reconcile(start, companies, emptyList())
+        assertEquals(450, plan.visitsToUpsert.size)
+        val loads = plan.visitsToUpsert.groupBy { it.date to it.shift }.values.map { it.size }
+        assertTrue(loads.maxOrNull()!! - loads.minOrNull()!! <= 4)
     }
 }

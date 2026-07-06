@@ -7,8 +7,8 @@ import java.util.Locale
 import java.util.UUID
 
 enum class Shift(val displayName: String) {
-    MORNING("Morning Shift"),
-    EVENING("Evening Shift");
+    MORNING("الفترة الصباحية"),
+    EVENING("الفترة المسائية");
 
     val arabicName: String
         get() = when (this) {
@@ -99,7 +99,7 @@ data class CycleInfo(
         get() = currentCycleStart.month.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
 
     val title: String
-        get() = "Current Cycle: $cycleName - Week $weekOfCycle"
+        get() = "الدورة الحالية: $cycleName - الأسبوع $weekOfCycle"
 
     val arabicTitle: String
         get() = "الدورة الحالية: $cycleName - الأسبوع $weekOfCycle"

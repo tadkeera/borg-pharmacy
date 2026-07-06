@@ -99,10 +99,10 @@ class MainActivity : ComponentActivity() {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "application/octet-stream"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Borg Pharmacy Database Backup")
+                putExtra(Intent.EXTRA_SUBJECT, "نسخة احتياطية قاعدة بيانات صيدلية برج الأطباء")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(intent, "Cloud Backup via Google Drive"))
+            startActivity(Intent.createChooser(intent, "نسخ احتياطي سحابي عبر Google Drive"))
         }
     }
 

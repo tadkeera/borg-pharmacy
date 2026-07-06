@@ -48,7 +48,7 @@ class BorgAppViewModel(
     fun login(username: String, passcode: String) = viewModelScope.launch {
         val user = repository.login(username, passcode)
         if (user == null) {
-            _state.update { it.copy(loginError = "Invalid username or activation code") }
+            _state.update { it.copy(loginError = "اسم المستخدم أو كود التفعيل غير صحيح") }
         } else {
             _state.update { it.copy(currentUser = user, loginError = null, mustChangePasscodeUser = if (user.mustChangePasscode) user else null) }
         }
@@ -57,7 +57,7 @@ class BorgAppViewModel(
     fun changeForcedPasscode(newPasscode: String) = viewModelScope.launch {
         val user = _state.value.mustChangePasscodeUser ?: return@launch
         if (newPasscode.length < 6) {
-            _state.update { it.copy(loginError = "New code must be at least 6 characters") }
+            _state.update { it.copy(loginError = "يجب أن يكون الكود الجديد 6 أحرف على الأقل") }
             return@launch
         }
         repository.changePasscode(user.id, newPasscode)
@@ -70,12 +70,12 @@ class BorgAppViewModel(
 
     fun addCompany(name: String) = adminOnly {
         repository.addCompany(name)
-        snackbar("Company added")
+        snackbar("تمت إضافة الشركة")
     }
 
     fun importCompaniesCsv(csv: String) = adminOnly {
         val count = repository.importCompaniesCsv(csv)
-        snackbar("Imported $count companies")
+        snackbar("تم استيراد $count شركة")
     }
 
     fun updateTier(companyId: String, tier: Tier) = adminOnly {
@@ -85,28 +85,28 @@ class BorgAppViewModel(
     fun saveEvaluationsAndSchedule() = adminOnly {
         repository.rescheduleCurrentCycle()
         refreshReports()
-        snackbar("Evaluations saved and 28-day cycle schedule generated")
+        snackbar("تم حفظ التقييمات وتوليد جدول دورة 28 يومًا")
     }
 
     fun deleteCompany(companyId: String) = adminOnly {
         repository.deleteCompany(companyId)
         refreshReports()
-        snackbar("Company deleted and all its visits removed")
+        snackbar("تم حذف الشركة وإزالة جميع زياراتها")
     }
 
     fun addRepresentative(companyId: String, name: String, phone: String) = adminOnly {
         repository.addRepresentative(companyId, name, phone)
-        snackbar("Representative saved")
+        snackbar("تم حفظ المندوب")
     }
 
     fun deleteRepresentative(repId: String) = adminOnly {
         repository.deleteRepresentative(repId)
-        snackbar("Representative deleted")
+        snackbar("تم حذف المندوب")
     }
 
     fun createUser(username: String, displayName: String, role: UserRole, passcode: String) = adminOnly {
         repository.createUser(username, displayName, role, passcode)
-        snackbar("User created")
+        snackbar("تم إنشاء المستخدم")
     }
 
     fun markVisitStatus(visitId: String, status: VisitStatus) = adminOnly {
@@ -120,19 +120,19 @@ class BorgAppViewModel(
 
     fun backupNow() = viewModelScope.launch {
         repository.backupNow("manual")
-        snackbar("Local backup created in BORG PHARMACY/BACKUP")
+        snackbar("تم إنشاء نسخة احتياطية داخل BORG PHARMACY/BACKUP")
     }
 
     fun syncNow() = viewModelScope.launch {
         repository.syncNow()
-        snackbar("Cloud sync requested")
+        snackbar("تم طلب المزامنة السحابية")
     }
 
     fun clearSnackbar() = _state.update { it.copy(message = null) }
 
     private fun adminOnly(block: suspend () -> Unit) = viewModelScope.launch {
         if (_state.value.currentUser?.role != UserRole.ADMIN) {
-            snackbar("Read-only pharmacist access: changes are not permitted")
+            snackbar("صلاحية الصيدلي للقراءة والطباعة فقط ولا تسمح بالتعديل")
             return@launch
         }
         block()
