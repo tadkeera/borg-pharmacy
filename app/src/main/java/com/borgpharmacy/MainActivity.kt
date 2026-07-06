@@ -79,7 +79,8 @@ class MainActivity : ComponentActivity() {
                     container.whatsAppMessenger.openItinerary(
                         company = company,
                         representative = rep,
-                        visits = state.visitsByCompany[company.id].orEmpty(),
+                        visits = state.visitsByCompany[company.id].orEmpty()
+                            .filter { it.cycleStartEpochDay == state.cycleInfo.currentCycleStart.toEpochDay() },
                     )
                 },
                 onBackup = viewModel::backupNow,

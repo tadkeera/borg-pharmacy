@@ -34,7 +34,15 @@ class BorgAppViewModel(
     init {
         viewModelScope.launch {
             val start = repository.initialize()
-            _state.update { it.copy(initialized = true, cycleStart = start, cycleInfo = cycleCalculator.currentCycle(start)) }
+            val savedUser = repository.restoreSavedSession()
+            _state.update {
+                it.copy(
+                    initialized = true,
+                    cycleStart = start,
+                    cycleInfo = cycleCalculator.currentCycle(start),
+                    currentUser = savedUser,
+                )
+            }
             refreshReports()
         }
         viewModelScope.launch { repository.observeCompanies().collect { value -> _state.update { it.copy(companies = value) } } }
@@ -64,7 +72,8 @@ class BorgAppViewModel(
         _state.update { it.copy(currentUser = user.copy(mustChangePasscode = false), mustChangePasscodeUser = null, loginError = null) }
     }
 
-    fun logout() {
+    fun logout() = viewModelScope.launch {
+        repository.clearSavedSession()
         _state.update { it.copy(currentUser = null) }
     }
 

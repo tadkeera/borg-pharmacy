@@ -6,7 +6,7 @@ import org.junit.Test
 import java.time.LocalDate
 
 class ScheduleGeneratorTest {
-    private val start = LocalDate.of(2021, 7, 3) // Saturday 03 July, fixed Borg baseline
+    private val start = LocalDate.of(2026, 7, 4) // Saturday 04 July, fixed Borg baseline
 
     @Test
     fun tierAReceivesThreeVisits() {

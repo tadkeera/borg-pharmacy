@@ -46,6 +46,8 @@ interface BorgRepository {
     suspend fun initialize(): LocalDate
     suspend fun cycleStart(): LocalDate
     suspend fun login(username: String, passcode: String): UserAccount?
+    suspend fun restoreSavedSession(): UserAccount?
+    suspend fun clearSavedSession()
     suspend fun changePasscode(userId: String, newPasscode: String)
     suspend fun createUser(username: String, displayName: String, role: UserRole, passcode: String)
 
@@ -62,6 +64,8 @@ interface BorgRepository {
     suspend fun backupNow(reason: String = "manual")
     suspend fun dashboardScores(): List<CompanyReportScore>
 }
+
+private const val SESSION_USER_ID_KEY = "session_user_id"
 
 class OfflineFirstBorgRepository(
     private val db: BorgDatabase,
@@ -84,15 +88,15 @@ class OfflineFirstBorgRepository(
         seedDefaultAdmin()
         val start = cycleStart()
         backupService.dumpDatabase("launch")
+        scope.launch { syncNow() }
         return start
     }
 
     override suspend fun cycleStart(): LocalDate {
         // Borg Pharmacy fixed 28-day cycle anchor:
-        // Saturday 03 July is treated as Day 1 / Week 1. 2021 is the past year
-        // where 03 July was actually Saturday, and every 28-day cycle preserves
-        // the same Saturday-to-Friday weekly rhythm.
-        val fixedBaseline = LocalDate.of(2021, 7, 3)
+        // Saturday 04 July 2026 is treated as Day 1 / Week 1.
+        // Every 28 days the same four-week table rotates, regardless of calendar month.
+        val fixedBaseline = LocalDate.of(2026, 7, 4)
         val currentCycleStart = cycleCalculator.currentCycle(fixedBaseline, LocalDate.now()).currentCycleStart
         db.appSettingsDao().set(AppSettingEntity("fixed_cycle_baseline_epoch_day", fixedBaseline.toEpochDay().toString()))
         db.appSettingsDao().set(AppSettingEntity("current_cycle_start_epoch_day", currentCycleStart.toEpochDay().toString()))
@@ -115,11 +119,28 @@ class OfflineFirstBorgRepository(
 
     override suspend fun login(username: String, passcode: String): UserAccount? {
         val user = db.userDao().findByUsername(username.trim()) ?: return null
-        return if (SecurityHasher.verify(passcode, user.passcodeHash)) user.toDomain() else null
+        if (!SecurityHasher.verify(passcode, user.passcodeHash)) return null
+        if (!user.mustChangePasscode) saveSession(user.id)
+        return user.toDomain()
+    }
+
+    override suspend fun restoreSavedSession(): UserAccount? {
+        val userId = db.appSettingsDao().getValue(SESSION_USER_ID_KEY)?.takeIf { it.isNotBlank() } ?: return null
+        val user = db.userDao().getById(userId) ?: return null
+        return if (user.mustChangePasscode) null else user.toDomain()
+    }
+
+    override suspend fun clearSavedSession() {
+        db.appSettingsDao().set(AppSettingEntity(SESSION_USER_ID_KEY, ""))
+    }
+
+    private suspend fun saveSession(userId: String) {
+        db.appSettingsDao().set(AppSettingEntity(SESSION_USER_ID_KEY, userId))
     }
 
     override suspend fun changePasscode(userId: String, newPasscode: String) {
         db.userDao().changePasscode(userId, SecurityHasher.hashPasscode(newPasscode))
+        saveSession(userId)
         afterMutation("passcode")
     }
 
@@ -226,9 +247,54 @@ class OfflineFirstBorgRepository(
                 if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
                 if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
             }
+
+            if (ensureCurrentCycleSchedule()) {
+                val generatedVisits = db.visitDao().dirty()
+                syncService.pushVisits(generatedVisits)
+                if (generatedVisits.isNotEmpty()) db.visitDao().markClean(generatedVisits.map { it.id })
+                backupService.dumpDatabase("cycle_rotation")
+            }
         } catch (throwable: Throwable) {
             Log.w("BorgSync", "Cloud sync skipped/failed; local cache remains authoritative", throwable)
         }
+    }
+
+    private suspend fun ensureCurrentCycleSchedule(): Boolean {
+        val start = cycleStart()
+        val currentEpoch = start.toEpochDay()
+        if (db.visitDao().listCycle(currentEpoch).isNotEmpty()) return false
+
+        val companies = db.companyDao().search("").map { it.toDomain() }.filter { it.tier.visitsPerCycle > 0 }
+        if (companies.isEmpty()) return false
+
+        val templateEpoch = db.visitDao().latestCycleBefore(currentEpoch)
+        val candidateVisits = if (templateEpoch != null) {
+            val activeCompanyIds = companies.map { it.id }.toSet()
+            db.visitDao().listCycle(templateEpoch)
+                .map { it.toDomain() }
+                .filter { it.companyId in activeCompanyIds }
+                .map { template ->
+                    val date = start.plusDays((template.dayOfCycle - 1).toLong())
+                    template.copy(
+                        id = UUID.nameUUIDFromBytes("${template.companyId}-$currentEpoch-${template.dayOfCycle}-${template.shift}-${template.slotIndex}".toByteArray()).toString(),
+                        cycleStartEpochDay = currentEpoch,
+                        date = date,
+                        status = VisitStatus.SCHEDULED,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis(),
+                        deletedAt = null,
+                    )
+                }
+        } else {
+            emptyList()
+        }
+
+        val plan = scheduleGenerator.reconcile(start, companies, candidateVisits)
+        val deletedIds = plan.visitsToSoftDelete.map { it.id }.toSet()
+        val finalVisits = candidateVisits.filterNot { it.id in deletedIds } + plan.visitsToUpsert
+        if (finalVisits.isEmpty()) return false
+        db.visitDao().upsertAll(finalVisits.map { it.toEntity() })
+        return true
     }
 
     override suspend fun backupNow(reason: String) {

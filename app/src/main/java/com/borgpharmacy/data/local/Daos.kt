@@ -83,6 +83,9 @@ interface VisitDao {
     @Query("SELECT * FROM visits WHERE deletedAt IS NULL AND cycleStartEpochDay = :cycleStartEpochDay")
     suspend fun listCycle(cycleStartEpochDay: Long): List<VisitEntity>
 
+    @Query("SELECT MAX(cycleStartEpochDay) FROM visits WHERE deletedAt IS NULL AND cycleStartEpochDay < :cycleStartEpochDay")
+    suspend fun latestCycleBefore(cycleStartEpochDay: Long): Long?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: VisitEntity)
 
@@ -118,6 +121,9 @@ interface UserDao {
 
     @Query("SELECT * FROM users WHERE username = :username COLLATE NOCASE AND active = 1 LIMIT 1")
     suspend fun findByUsername(username: String): UserEntity?
+
+    @Query("SELECT * FROM users WHERE id = :userId AND active = 1 LIMIT 1")
+    suspend fun getById(userId: String): UserEntity?
 
     @Query("SELECT COUNT(*) FROM users")
     suspend fun count(): Int

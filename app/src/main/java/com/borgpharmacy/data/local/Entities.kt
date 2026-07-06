@@ -130,7 +130,7 @@ data class TierCountTuple(
 
 fun CompanyEntity.toDomain(): Company = Company(
     id = id,
-    name = name,
+    name = name.cleanCompanyName(),
     tier = Tier.fromString(tier),
     createdAt = createdAt,
     updatedAt = updatedAt,
@@ -139,7 +139,7 @@ fun CompanyEntity.toDomain(): Company = Company(
 
 fun Company.toEntity(dirty: Boolean = true): CompanyEntity = CompanyEntity(
     id = id,
-    name = name.trim(),
+    name = name.cleanCompanyName(),
     tier = tier.name,
     createdAt = createdAt,
     updatedAt = updatedAt,
@@ -207,3 +207,7 @@ fun UserEntity.toDomain(): UserAccount = UserAccount(
     mustChangePasscode = mustChangePasscode,
     isActive = active,
 )
+
+private fun String.cleanCompanyName(): String = trim()
+    .trim('"', '\'', '“', '”')
+    .trim()

@@ -308,7 +308,8 @@ private fun HomeScreen(
 ) {
     val today = state.cycleInfo.today
     val companies = state.companies.associateBy { it.id }
-    val visitsToday = state.visits.filter { it.date == today && companies.containsKey(it.companyId) }
+    val currentCycleEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
+    val visitsToday = state.visits.filter { it.cycleStartEpochDay == currentCycleEpoch && it.date == today && companies.containsKey(it.companyId) }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             HomeHeroCard(
@@ -469,11 +470,9 @@ private fun ShiftTableHeader(accent: Color) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("الترتيب", modifier = Modifier.width(58.dp), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text("الشركة", modifier = Modifier.weight(1.4f), color = accent, fontWeight = FontWeight.Bold)
-        Text("التصنيف", modifier = Modifier.weight(0.7f), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text("الحالة", modifier = Modifier.weight(0.8f), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text("الطباعة", modifier = Modifier.weight(0.8f), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text("م", modifier = Modifier.width(52.dp), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text("اسم الشركة", modifier = Modifier.weight(1f), color = accent, fontWeight = FontWeight.Bold)
+        Text("المندوبون / الطباعة", modifier = Modifier.width(128.dp), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
     }
 }
 
@@ -502,7 +501,7 @@ private fun VisitTableRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
-                        .width(58.dp)
+                        .width(52.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(accent.copy(alpha = 0.12f))
                         .padding(vertical = 9.dp),
@@ -510,15 +509,26 @@ private fun VisitTableRow(
                 ) {
                     Text(visit.slotIndex.toString(), color = accent, fontWeight = FontWeight.ExtraBold)
                 }
-                Column(Modifier.weight(1.4f).padding(horizontal = 8.dp)) {
+                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                     Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${reps.size} مندوب مسجل", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
+                    Text("اضغط على اسم الشركة لعرض المندوبين", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Text(company.tier.arabicLabel(), modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, color = company.tier.color())
-                StatusBadge(visit.status, Modifier.weight(0.8f))
-                Row(modifier = Modifier.weight(0.8f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.width(128.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(accent.copy(alpha = 0.10f))
+                            .padding(horizontal = 9.dp, vertical = 6.dp),
+                    ) {
+                        Text("${reps.size} مندوب", color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Spacer(Modifier.width(6.dp))
                     Icon(Icons.Default.Print, contentDescription = null, tint = accent)
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(3.dp))
                     Text(reps.sumOf { state.printCountMap[it.id to visit.id] ?: 0 }.toString(), color = accent, fontWeight = FontWeight.Bold)
                 }
             }
@@ -553,6 +563,7 @@ private fun VisitTableRow(
 private fun WeeklyScreen(state: BorgUiState, modifier: Modifier) {
     var selectedWeek by rememberSaveable { mutableStateOf(1) }
     val companies = state.companies.associateBy { it.id }
+    val currentCycleEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
     Column(modifier.padding(16.dp)) {
         HeaderCard(
             title = "جداول الزيارات الأسبوعية",
@@ -574,7 +585,7 @@ private fun WeeklyScreen(state: BorgUiState, modifier: Modifier) {
             val weekStart = state.cycleInfo.currentCycleStart.plusDays(((selectedWeek - 1) * 7).toLong())
             val days = (0..6).map { weekStart.plusDays(it.toLong()) }.filter { it.dayOfWeek.isBorgWorkingDay() }
             items(days) { day ->
-                val visits = state.visits.filter { it.date == day }
+                val visits = state.visits.filter { it.cycleStartEpochDay == currentCycleEpoch && it.date == day }
                 WeeklyDayCard(day, visits, companies)
             }
         }
