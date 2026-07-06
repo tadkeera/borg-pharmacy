@@ -55,6 +55,8 @@ interface BorgRepository {
     suspend fun addCompany(name: String): Company
     suspend fun importCompaniesCsv(csv: String): Int
     suspend fun updateCompanyTier(companyId: String, tier: Tier)
+    suspend fun updateCompanyTiers(changes: Map<String, Tier>)
+    suspend fun updateCompanyName(companyId: String, name: String)
     suspend fun deleteCompany(companyId: String)
     suspend fun addRepresentative(companyId: String, name: String, phone: String): Representative
     suspend fun deleteRepresentative(repId: String)
@@ -183,20 +185,53 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun updateCompanyTier(companyId: String, tier: Tier) {
-        db.withTransaction {
-            db.companyDao().updateTier(companyId, tier.name)
-            adjustCompanyVisitsForTier(companyId, tier)
-        }
-        afterMutation("tier")
+        updateCompanyTiers(mapOf(companyId to tier))
     }
 
-    private suspend fun adjustCompanyVisitsForTier(companyId: String, tier: Tier) {
+    override suspend fun updateCompanyTiers(changes: Map<String, Tier>) {
+        val normalized = changes.filterKeys { it.isNotBlank() }
+        if (normalized.isEmpty()) return
+
         val start = cycleStart()
-        val entity = db.companyDao().getById(companyId)
-        val company = (entity?.toDomain() ?: Company(id = companyId, name = "", tier = tier)).copy(tier = tier)
-        val allVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
-        val plan = scheduleGenerator.reconcileSingleCompany(start, company, allVisits)
-        applySchedulePlan(plan)
+        db.withTransaction {
+            var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+            val accumulatedDeletes = mutableListOf<Visit>()
+            val accumulatedUpserts = mutableListOf<Visit>()
+
+            normalized.forEach { (companyId, newTier) ->
+                val entity = db.companyDao().getById(companyId) ?: return@forEach
+                val oldTier = Tier.fromString(entity.tier)
+                if (oldTier == newTier) return@forEach
+
+                db.companyDao().updateTier(companyId, newTier.name)
+                val company = entity.toDomain().copy(tier = newTier)
+                val plan = scheduleGenerator.reconcileSingleCompany(start, company, workingVisits)
+                val deleteIds = plan.visitsToSoftDelete.map { it.id }.toSet()
+
+                accumulatedDeletes += plan.visitsToSoftDelete
+                accumulatedUpserts += plan.visitsToUpsert
+                workingVisits = workingVisits.filterNot { it.id in deleteIds } + plan.visitsToUpsert
+            }
+
+            applySchedulePlan(
+                SchedulePlan(
+                    visitsToUpsert = accumulatedUpserts.distinctBy { it.id },
+                    visitsToSoftDelete = accumulatedDeletes.distinctBy { it.id },
+                )
+            )
+        }
+        afterMutation("tier_batch")
+    }
+
+    override suspend fun updateCompanyName(companyId: String, name: String) {
+        val cleanName = name.trim()
+            .removeSurrounding("\"")
+            .removeSurrounding("'")
+            .removeSurrounding("“", "”")
+            .trim()
+        if (cleanName.isBlank()) return
+        db.companyDao().updateName(companyId, cleanName)
+        afterMutation("company_name")
     }
 
     private suspend fun applySchedulePlan(plan: SchedulePlan) {

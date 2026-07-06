@@ -29,6 +29,9 @@ interface CompanyDao {
     @Query("UPDATE companies SET tier = :tier, updatedAt = :updatedAt, dirty = 1 WHERE id = :companyId")
     suspend fun updateTier(companyId: String, tier: String, updatedAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE companies SET name = :name, updatedAt = :updatedAt, dirty = 1 WHERE id = :companyId")
+    suspend fun updateName(companyId: String, name: String, updatedAt: Long = System.currentTimeMillis())
+
     @Query("UPDATE companies SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE id = :companyId")
     suspend fun softDelete(companyId: String, deletedAt: Long = System.currentTimeMillis())
 

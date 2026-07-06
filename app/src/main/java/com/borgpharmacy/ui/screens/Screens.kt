@@ -40,7 +40,9 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -133,8 +135,8 @@ fun BorgApp(
     onLogout: () -> Unit,
     onAddCompany: (String) -> Unit,
     onImportCsv: () -> Unit,
-    onUpdateTier: (String, Tier) -> Unit,
-    onSaveEvaluations: () -> Unit,
+    onSaveTierChanges: (Map<String, Tier>) -> Unit,
+    onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
@@ -193,18 +195,19 @@ fun BorgApp(
                 .fillMaxSize()
                 .background(Color(0xFFF7FAFE))
             when (selected) {
-                Route.HOME -> HomeScreen(state, onPrint, onMarkVisitStatus, contentModifier)
+                Route.HOME -> HomeScreen(state, onPrint, onMarkVisitStatus, onSync, contentModifier)
                 Route.WEEKLY -> WeeklyScreen(state, contentModifier)
                 Route.COMPANIES -> CompanyProfilesScreen(
                     state = state,
                     onAddCompany = onAddCompany,
                     onImportCsv = onImportCsv,
+                    onUpdateCompanyName = onUpdateCompanyName,
                     onDeleteCompany = onDeleteCompany,
                     onAddRepresentative = onAddRepresentative,
                     onDeleteRepresentative = onDeleteRepresentative,
                     modifier = contentModifier,
                 )
-                Route.EVALUATION -> EvaluationScreen(state, onImportCsv, onUpdateTier, onSaveEvaluations, contentModifier)
+                Route.EVALUATION -> EvaluationScreen(state, onImportCsv, onSaveTierChanges, contentModifier)
                 Route.ENQUIRIES -> EnquiriesScreen(state, onWhatsApp, contentModifier)
                 Route.DASHBOARD -> DashboardScreen(state, contentModifier)
                 Route.SETTINGS -> SettingsScreen(
@@ -304,6 +307,7 @@ private fun HomeScreen(
     state: BorgUiState,
     onPrint: (Company, Representative, Visit) -> Unit,
     onMarkVisitStatus: (String, VisitStatus) -> Unit,
+    onSync: () -> Unit,
     modifier: Modifier,
 ) {
     val today = state.cycleInfo.today
@@ -318,6 +322,7 @@ private fun HomeScreen(
                 cycleEnd = state.cycleInfo.currentCycleEnd,
                 week = state.cycleInfo.weekOfCycle,
                 totalVisits = visitsToday.size,
+                onSync = onSync,
             )
         }
         item {
@@ -350,7 +355,14 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun HomeHeroCard(date: LocalDate, cycleStart: LocalDate, cycleEnd: LocalDate, week: Int, totalVisits: Int) {
+private fun HomeHeroCard(
+    date: LocalDate,
+    cycleStart: LocalDate,
+    cycleEnd: LocalDate,
+    week: Int,
+    totalVisits: Int,
+    onSync: () -> Unit,
+) {
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
@@ -367,7 +379,20 @@ private fun HomeHeroCard(date: LocalDate, cycleStart: LocalDate, cycleEnd: Local
                 .padding(18.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("جدول زيارات اليوم", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "جدول زيارات اليوم",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(onClick = onSync) {
+                        Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(6.dp))
+                        Text("مزامنة", color = Color.White)
+                    }
+                }
                 Text(date.format(arabicLongDateFormatter), color = Color.White.copy(alpha = 0.92f), style = MaterialTheme.typography.titleMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     GlassPill("الأسبوع $week")
@@ -637,6 +662,7 @@ private fun CompanyProfilesScreen(
     state: BorgUiState,
     onAddCompany: (String) -> Unit,
     onImportCsv: () -> Unit,
+    onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
@@ -660,7 +686,7 @@ private fun CompanyProfilesScreen(
             }
         }
         items(filtered, key = { it.id }) { company ->
-            CompanyProfileCard(company, state, onDeleteCompany, onAddRepresentative, onDeleteRepresentative)
+            CompanyProfileCard(company, state, onUpdateCompanyName, onDeleteCompany, onAddRepresentative, onDeleteRepresentative)
         }
     }
 }
@@ -669,22 +695,57 @@ private fun CompanyProfilesScreen(
 private fun CompanyProfileCard(
     company: Company,
     state: BorgUiState,
+    onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var editNameMode by rememberSaveable(company.id) { mutableStateOf(false) }
+    var editedName by rememberSaveable(company.id) { mutableStateOf(company.name) }
+    var showDeleteConfirm by rememberSaveable(company.id) { mutableStateOf(false) }
     var repName by rememberSaveable { mutableStateOf("") }
     var repPhone by rememberSaveable { mutableStateOf("+967") }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("تأكيد حذف الشركة") },
+            text = { Text("هل أنت متأكد من حذف شركة ${company.name}؟ سيتم حذف جميع زياراتها فقط دون تغيير ترتيب بقية الجدول.") },
+            confirmButton = {
+                Button(onClick = { showDeleteConfirm = false; onDeleteCompany(company.id) }) { Text("نعم، حذف") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteConfirm = false }) { Text("تراجع") }
+            },
+        )
+    }
+
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
-                    Text("المعرف: ${company.id.take(8)} • ${company.tier.arabicLabel()}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
+                    if (editNameMode) {
+                        OutlinedTextField(
+                            value = editedName,
+                            onValueChange = { editedName = it },
+                            label = { Text("اسم الشركة") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
+                    }
+                    Text("المعرف ثابت: ${company.id.take(8)} • ${company.tier.arabicLabel()}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
+                }
+                if (editNameMode) {
+                    TextButton(onClick = { onUpdateCompanyName(company.id, editedName); editNameMode = false }) { Text("حفظ التعديل") }
+                    TextButton(onClick = { editedName = company.name; editNameMode = false }) { Text("إلغاء") }
+                } else {
+                    TextButton(onClick = { editedName = company.name; editNameMode = true }, enabled = state.isAdmin) { Text("تعديل") }
                 }
                 TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "إخفاء المندوبين" else "المندوبون") }
-                IconButton(onClick = { onDeleteCompany(company.id) }, enabled = state.isAdmin) { Icon(Icons.Default.Delete, contentDescription = "حذف") }
+                IconButton(onClick = { showDeleteConfirm = true }, enabled = state.isAdmin) { Icon(Icons.Default.Delete, contentDescription = "حذف") }
             }
             if (expanded) {
                 val reps = state.repsByCompany[company.id].orEmpty()
@@ -709,8 +770,7 @@ private fun CompanyProfileCard(
 private fun EvaluationScreen(
     state: BorgUiState,
     onImportCsv: () -> Unit,
-    onUpdateTier: (String, Tier) -> Unit,
-    onSaveEvaluations: () -> Unit,
+    onSaveTierChanges: (Map<String, Tier>) -> Unit,
     modifier: Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -741,12 +801,13 @@ private fun EvaluationScreen(
                 } else {
                     Button(
                         onClick = {
-                            state.companies.forEach { company ->
+                            val changedTiers = state.companies.mapNotNull { company ->
                                 val newTier = pendingTiers[company.id] ?: company.tier
-                                if (newTier != company.tier) onUpdateTier(company.id, newTier)
-                            }
+                                if (newTier != company.tier) company.id to newTier else null
+                            }.toMap()
                             editMode = false
-                            onSaveEvaluations()
+                            pendingTiers = emptyMap()
+                            onSaveTierChanges(changedTiers)
                         },
                         enabled = state.isAdmin,
                     ) {

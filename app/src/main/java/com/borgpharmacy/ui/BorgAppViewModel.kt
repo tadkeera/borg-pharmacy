@@ -89,11 +89,27 @@ class BorgAppViewModel(
 
     fun updateTier(companyId: String, tier: Tier) = adminOnly {
         repository.updateCompanyTier(companyId, tier)
+        refreshReports()
+    }
+
+    fun saveTierChanges(changes: Map<String, Tier>) = adminOnly {
+        if (changes.isEmpty()) {
+            snackbar("لا توجد تعديلات تقييم للحفظ")
+            return@adminOnly
+        }
+        repository.updateCompanyTiers(changes)
+        refreshReports()
+        snackbar("تم حفظ ${changes.size} تعديل تقييم دفعة واحدة بدون إعادة توزيع الجدول")
     }
 
     fun saveEvaluationsAndSchedule() = adminOnly {
         refreshReports()
         snackbar("تم حفظ تعديلات التقييم مع الحفاظ التام على ترتيب الجدول")
+    }
+
+    fun updateCompanyName(companyId: String, name: String) = adminOnly {
+        repository.updateCompanyName(companyId, name)
+        snackbar("تم حفظ اسم الشركة دون تغيير المعرف")
     }
 
     fun deleteCompany(companyId: String) = adminOnly {
