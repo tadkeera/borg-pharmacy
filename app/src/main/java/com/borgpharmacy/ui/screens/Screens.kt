@@ -136,6 +136,7 @@ fun BorgApp(
     onExportCompanies: (String) -> Unit,
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
+    onDeleteAllCompanies: () -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
     onCreateUser: (String, String, UserRole, String) -> Unit,
@@ -202,6 +203,7 @@ fun BorgApp(
                     onExportCompanies = onExportCompanies,
                     onUpdateCompanyName = onUpdateCompanyName,
                     onDeleteCompany = onDeleteCompany,
+                    onDeleteAllCompanies = onDeleteAllCompanies,
                     onAddRepresentative = onAddRepresentative,
                     onDeleteRepresentative = onDeleteRepresentative,
                     modifier = contentModifier,
@@ -663,13 +665,30 @@ private fun CompanyProfilesScreen(
     onExportCompanies: (String) -> Unit,
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
+    onDeleteAllCompanies: () -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
     modifier: Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var newCompany by rememberSaveable { mutableStateOf("") }
+    var showDeleteAllConfirm by rememberSaveable { mutableStateOf(false) }
     val filtered = state.companies.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
+
+    if (showDeleteAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllConfirm = false },
+            title = { Text("تأكيد حذف جميع الشركات") },
+            text = { Text("سيتم حذف جميع الشركات والمندوبين وجميع الزيارات المرتبطة بها. لا يتم تحريك أي جدول آخر، وسيتم إنشاء نسخة احتياطية تلقائيًا. هل تريد المتابعة؟") },
+            confirmButton = {
+                Button(onClick = { showDeleteAllConfirm = false; onDeleteAllCompanies() }) { Text("نعم، حذف الكل") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteAllConfirm = false }) { Text("تراجع") }
+            },
+        )
+    }
+
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { HeaderCard("ملفات الشركات", "بحث ذكي باللغة العربية والإنجليزية، واستيراد CSV، وإدارة مندوبي كل شركة.", listOf(BorgBlue, Color(0xFF3A93D8))) }
         item {
@@ -684,6 +703,11 @@ private fun CompanyProfilesScreen(
                     OutlinedButton(onClick = { onExportCompanies("csv") }) { Text("تصدير CSV") }
                     OutlinedButton(onClick = { onExportCompanies("pdf") }) { Text("تصدير PDF") }
                     OutlinedButton(onClick = { onExportCompanies("html") }) { Text("تصدير HTML") }
+                }
+                OutlinedButton(onClick = { showDeleteAllConfirm = true }, enabled = state.isAdmin && state.companies.isNotEmpty()) {
+                    Icon(Icons.Default.Delete, null, tint = BorgRed)
+                    Spacer(Modifier.width(6.dp))
+                    Text("حذف الكل", color = BorgRed)
                 }
                 if (query.length in 1..2) Text("اكتب 3 أحرف لعرض الاقتراحات الذكية.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
                 if (query.length >= 3) Text("تم العثور على ${filtered.size} نتيجة", style = MaterialTheme.typography.bodySmall, color = BorgBlue)

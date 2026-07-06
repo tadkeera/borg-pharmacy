@@ -58,6 +58,7 @@ interface BorgRepository {
     suspend fun updateCompanyTiers(changes: Map<String, Tier>)
     suspend fun updateCompanyName(companyId: String, name: String)
     suspend fun deleteCompany(companyId: String)
+    suspend fun deleteAllCompanies()
     suspend fun addRepresentative(companyId: String, name: String, phone: String): Representative
     suspend fun deleteRepresentative(repId: String)
     suspend fun setVisitStatus(visitId: String, status: VisitStatus)
@@ -186,7 +187,7 @@ class OfflineFirstBorgRepository(
             db.withTransaction {
                 db.companyDao().upsertAll(rows)
                 val start = cycleStart()
-                val companies = db.companyDao().search("").map { it.toDomain() }
+                val companies = db.companyDao().listActive().map { it.toDomain() }
                 val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
                 val plan = scheduleGenerator.reconcile(start, companies, visits)
                 applySchedulePlan(plan)
@@ -260,6 +261,16 @@ class OfflineFirstBorgRepository(
         afterMutation("company_delete")
     }
 
+    override suspend fun deleteAllCompanies() {
+        db.withTransaction {
+            val timestamp = System.currentTimeMillis()
+            db.companyDao().softDeleteAll(timestamp)
+            db.representativeDao().softDeleteAll(timestamp)
+            db.visitDao().softDeleteAll(timestamp)
+        }
+        afterMutation("company_delete_all")
+    }
+
     override suspend fun addRepresentative(companyId: String, name: String, phone: String): Representative {
         val rep = Representative(companyId = companyId, name = name.trim(), phone = normalizePhone(phone))
         db.representativeDao().upsert(rep.toEntity())
@@ -284,7 +295,7 @@ class OfflineFirstBorgRepository(
 
     override suspend fun rescheduleCurrentCycle() {
         val start = cycleStart()
-        val companies = db.companyDao().search("").map { it.toDomain() }
+        val companies = db.companyDao().listActive().map { it.toDomain() }
         val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
         val plan = scheduleGenerator.reconcile(start, companies, visits)
         db.withTransaction { applySchedulePlan(plan) }
@@ -324,7 +335,7 @@ class OfflineFirstBorgRepository(
     private suspend fun ensureCurrentCycleSchedule(): Boolean {
         val start = cycleStart()
         val currentEpoch = start.toEpochDay()
-        val companies = db.companyDao().search("").map { it.toDomain() }
+        val companies = db.companyDao().listActive().map { it.toDomain() }
         if (companies.isEmpty()) return false
 
         val currentVisits = db.visitDao().listCycle(currentEpoch).map { it.toDomain() }
@@ -365,7 +376,7 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun dashboardScores(): List<CompanyReportScore> {
-        val companies = db.companyDao().search("").map { it.toDomain() }
+        val companies = db.companyDao().listActive().map { it.toDomain() }
         val visits = db.visitDao().listCycle(cycleStart().toEpochDay()).map { it.toDomain() }
         return companies.map { company ->
             val expected = 4

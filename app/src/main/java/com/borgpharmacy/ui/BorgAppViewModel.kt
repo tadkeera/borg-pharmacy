@@ -118,6 +118,12 @@ class BorgAppViewModel(
         snackbar("تم حذف الشركة وإزالة جميع زياراتها")
     }
 
+    fun deleteAllCompanies() = adminOnly {
+        repository.deleteAllCompanies()
+        refreshReports()
+        snackbar("تم حذف جميع الشركات والمندوبين والزيارات")
+    }
+
     fun addRepresentative(companyId: String, name: String, phone: String) = adminOnly {
         repository.addRepresentative(companyId, name, phone)
         snackbar("تم حفظ المندوب")

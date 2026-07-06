@@ -11,6 +11,9 @@ interface CompanyDao {
     @Query("SELECT * FROM companies WHERE deletedAt IS NULL ORDER BY name COLLATE NOCASE")
     fun observeActive(): Flow<List<CompanyEntity>>
 
+    @Query("SELECT * FROM companies WHERE deletedAt IS NULL ORDER BY name COLLATE NOCASE")
+    suspend fun listActive(): List<CompanyEntity>
+
     @Query("SELECT * FROM companies WHERE deletedAt IS NULL AND name LIKE '%' || :query || '%' ORDER BY name COLLATE NOCASE LIMIT 50")
     suspend fun search(query: String): List<CompanyEntity>
 
@@ -34,6 +37,9 @@ interface CompanyDao {
 
     @Query("UPDATE companies SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE id = :companyId")
     suspend fun softDelete(companyId: String, deletedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE companies SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE deletedAt IS NULL")
+    suspend fun softDeleteAll(deletedAt: Long = System.currentTimeMillis())
 
     @Query("UPDATE companies SET dirty = 0 WHERE id IN (:ids)")
     suspend fun markClean(ids: List<String>)
@@ -61,6 +67,9 @@ interface RepresentativeDao {
 
     @Query("UPDATE representatives SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE id = :repId")
     suspend fun softDelete(repId: String, deletedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE representatives SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE deletedAt IS NULL")
+    suspend fun softDeleteAll(deletedAt: Long = System.currentTimeMillis())
 
     @Query("UPDATE representatives SET dirty = 0 WHERE id IN (:ids)")
     suspend fun markClean(ids: List<String>)
@@ -100,6 +109,9 @@ interface VisitDao {
 
     @Query("UPDATE visits SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE companyId = :companyId AND deletedAt IS NULL")
     suspend fun softDeleteForCompany(companyId: String, deletedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE visits SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE deletedAt IS NULL")
+    suspend fun softDeleteAll(deletedAt: Long = System.currentTimeMillis())
 
     @Query("UPDATE visits SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1 WHERE id IN (:visitIds)")
     suspend fun softDeleteByIds(visitIds: List<String>, deletedAt: Long = System.currentTimeMillis())

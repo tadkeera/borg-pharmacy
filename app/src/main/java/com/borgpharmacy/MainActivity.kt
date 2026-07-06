@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
                 onExportCompanies = { format -> exportCompanies(format, state.companies) },
                 onUpdateCompanyName = viewModel::updateCompanyName,
                 onDeleteCompany = viewModel::deleteCompany,
+                onDeleteAllCompanies = viewModel::deleteAllCompanies,
                 onAddRepresentative = viewModel::addRepresentative,
                 onDeleteRepresentative = viewModel::deleteRepresentative,
                 onCreateUser = viewModel::createUser,
