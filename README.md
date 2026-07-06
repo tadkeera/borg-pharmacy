@@ -1,46 +1,96 @@
-# Borg Pharmacy 🏥💊
+# Borg Pharmacy — Medical Representatives Scheduling & Management
 
-Android app (Kotlin + Jetpack Compose) for managing pharmaceutical
-representative visit scheduling for the Borg Doctors Hospital pharmacy.
+Clean Android project for **Borg Pharmacy / Borg Medical Tower**.
 
-## Build status
+## Stack
 
-[![Android CI/CD](https://github.com/tadkeera/borg-pharmacy/actions/workflows/android.yml/badge.svg)](https://github.com/tadkeera/borg-pharmacy/actions/workflows/android.yml)
+- Kotlin
+- Jetpack Compose + Material Design 3
+- Room Database, offline-first local cache
+- Supabase cloud sync adapter
+- Clean Architecture-inspired package separation
+- 28-day scheduling cycle with static allocation rules
+- Thermal pass printing through Android Print Framework for 80mm receipts
+- WhatsApp itinerary messages
+- RBAC: Admin / Pharmacist
+- Local automatic database backups to `BORG PHARMACY/BACKUP`
 
-## Latest release
+## First Launch
 
-Signed, installable APKs are published automatically by GitHub Actions on every
-push to `main`. Download the latest APK from the
-[Releases page](https://github.com/tadkeera/borg-pharmacy/releases).
+1. Login username: `admin`
+2. Default activation code: `admin2026`
+3. The app forces immediate passcode change before entering the system.
 
-## ⚠️ "App not installed as package appears to be invalid"
+## Scheduling Logic
 
-This error meant the release APK was **unsigned** — Android refuses to install
-an unsigned package. This is now fixed:
+The app uses a fixed 28-day cycle. Working days are Saturday through Wednesday; Thursday and Friday are official weekends.
 
-- The `release` build type now signs the APK with a project release key
-  (`app/borg-release.jks` referenced from `keystore.properties`).
-- R8/ProGuard minification was disabled to avoid stripping reflection-based
-  Supabase/Ktor code at runtime.
-- Version bumped to `versionCode 2` / `versionName 1.1.0`.
-- CI verifies the signature with `apksigner` before publishing a release.
+Tier mapping:
 
-## Building locally
+- Tier A: 3 visits per cycle
+- Tier B: 2 visits per cycle
+- Tier C: 1 visit per cycle
+- Unrated: 0 visits
 
-Requirements: JDK 17, Android SDK (platform 34 + build-tools 34).
+Capacity:
+
+- Morning default: 7 companies, silent overflow up to 10
+- Evening default: 8 companies, silent overflow up to 10
+
+Static allocation:
+
+- Upgrades add missing visits only into open slots.
+- Downgrades remove only excess visits, starting from the latest visit; existing remaining slots are untouched.
+- Company deletion removes only that company's visits.
+
+## Supabase
+
+Run `supabase/schema.sql` in the Supabase SQL editor before enabling sync.
+
+The Android client is configured in `app/build.gradle.kts` using BuildConfig fields for the provided Supabase project URL and anon key. Ensure RLS policies match your deployment security requirements.
+
+## Signing and Updates
+
+The package name is static:
+
+```text
+com.borgpharmacy
+```
+
+`versionCode` starts at `1` and `versionName` at `1.0.0`. For every update, increment `versionCode` sequentially and update `versionName`.
+
+Do **not** commit keystores. Use `keystore.properties.example` as a template. For GitHub Actions release signing, set these repository secrets:
+
+- `BORG_KEYSTORE_BASE64`
+- `BORG_KEYSTORE_PASSWORD`
+- `BORG_KEY_ALIAS`
+- `BORG_KEY_PASSWORD`
+
+If secrets are not present, CI falls back to debug signing for build verification only; production devices need the same release keystore for seamless over-install updates.
+
+## Build
 
 ```bash
 ./gradlew assembleRelease
 ```
 
-Output: `app/build/outputs/apk/release/app-release.apk` (signed).
+The APK will be generated in:
 
-## Signing
+```text
+app/build/outputs/apk/release/
+```
 
-The release keystore and `keystore.properties` are committed to the repository
-so that **every build is signed with the same key** (local + CI). This keeps the
-digital signature consistent, which is required for the app to receive updates.
+## GitHub Release
 
-> **Security note:** for a shared/public production project you would normally
-> keep the keystore out of version control and inject it through CI secrets.
-> It is committed here intentionally so a single, reproducible signature is used.
+Push a tag such as:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The GitHub Action builds and attaches the APK to the release.
+
+## Arabic Note
+
+تم إنشاء المشروع من الصفر بعد إزالة ملفات المشروع السابق. التطبيق يدعم الصلاحيات الأساسية، الجداول اليومية والأسبوعية، التقييم، الاستعلامات عبر واتساب، التقارير، النسخ الاحتياطي، والتعامل بصلاحيات Admin / Pharmacist.

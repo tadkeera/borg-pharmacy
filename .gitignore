@@ -1,15 +1,13 @@
-# Gradle / build outputs
 .gradle/
 build/
-app/build/
-captures/
+*/build/
 local.properties
-
-# IDE files
+.DS_Store
 *.iml
 .idea/
-.DS_Store
-
-# NOTE: keystore.properties and app/borg-release.jks are intentionally
-# COMMITTED so that both local and CI builds sign the APK with the same key.
-# Do NOT add them here unless you switch to storing signing via CI secrets.
+*.jks
+*.keystore
+keystore.properties
+captures/
+.externalNativeBuild/
+.cxx/

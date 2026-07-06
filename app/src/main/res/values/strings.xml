@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Borg Pharmacy</string>
+    <string name="pharmacy_administration">Pharmacy Administration</string>
 </resources>
