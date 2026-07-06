@@ -470,9 +470,8 @@ private fun ShiftTableHeader(accent: Color) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("م", modifier = Modifier.width(52.dp), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("اسم الشركة", modifier = Modifier.weight(1f), color = accent, fontWeight = FontWeight.Bold)
-        Text("المندوبون / الطباعة", modifier = Modifier.width(128.dp), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text("الطباعة", modifier = Modifier.width(72.dp), color = accent, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
     }
 }
 
@@ -499,37 +498,19 @@ private fun VisitTableRow(
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    company.name,
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.ExtraBold,
+                    color = DeepNavy,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Box(
-                    Modifier
-                        .width(52.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(accent.copy(alpha = 0.12f))
-                        .padding(vertical = 9.dp),
+                    modifier = Modifier.width(72.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(visit.slotIndex.toString(), color = accent, fontWeight = FontWeight.ExtraBold)
-                }
-                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                    Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("اضغط على اسم الشركة لعرض المندوبين", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Row(
-                    modifier = Modifier.width(128.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(accent.copy(alpha = 0.10f))
-                            .padding(horizontal = 9.dp, vertical = 6.dp),
-                    ) {
-                        Text("${reps.size} مندوب", color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
-                    }
-                    Spacer(Modifier.width(6.dp))
-                    Icon(Icons.Default.Print, contentDescription = null, tint = accent)
-                    Spacer(Modifier.width(3.dp))
-                    Text(reps.sumOf { state.printCountMap[it.id to visit.id] ?: 0 }.toString(), color = accent, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.Print, contentDescription = "عرض المندوبين والطباعة", tint = accent)
                 }
             }
 
@@ -733,26 +714,64 @@ private fun EvaluationScreen(
     modifier: Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
+    var editMode by rememberSaveable { mutableStateOf(false) }
+    var pendingTiers by remember { mutableStateOf<Map<String, Tier>>(emptyMap()) }
     val filtered = state.companies.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            HeaderCard("تقييم الشركات والتصنيف", "الفئة A ثلاث زيارات، B زيارتان، C زيارة واحدة في كل دورة 28 يومًا.", listOf(BorgRed, Color(0xFFE35B6D)))
+            HeaderCard(
+                "تقييم الشركات والتصنيف",
+                "تعديل التقييم لا يعيد توزيع الجدول. ترتيب الجدول خط أحمر: يتم فقط حذف زيارة زائدة أو إضافة زيارة في أقل فترة متاحة.",
+                listOf(BorgRed, Color(0xFFE35B6D)),
+            )
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onSaveEvaluations, enabled = state.isAdmin) { Icon(Icons.Default.Save, null); Spacer(Modifier.width(6.dp)); Text("حفظ التقييمات وتوليد الجدول") }
+                if (!editMode) {
+                    Button(
+                        onClick = {
+                            pendingTiers = state.companies.associate { it.id to it.tier }
+                            editMode = true
+                        },
+                        enabled = state.isAdmin,
+                    ) {
+                        Icon(Icons.Default.Edit, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("تعديل التقييم")
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            state.companies.forEach { company ->
+                                val newTier = pendingTiers[company.id] ?: company.tier
+                                if (newTier != company.tier) onUpdateTier(company.id, newTier)
+                            }
+                            editMode = false
+                            onSaveEvaluations()
+                        },
+                        enabled = state.isAdmin,
+                    ) {
+                        Icon(Icons.Default.Save, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("حفظ التعديلات")
+                    }
+                    OutlinedButton(onClick = { editMode = false; pendingTiers = emptyMap() }) { Text("إلغاء") }
+                }
                 OutlinedButton(onClick = onImportCsv, enabled = state.isAdmin) { Text("استيراد CSV") }
             }
             Spacer(Modifier.height(8.dp))
             SearchBox(query, { query = it }, "ابحث للتقييم")
         }
         items(filtered, key = { it.id }) { company ->
+            val displayedTier = pendingTiers[company.id] ?: company.tier
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
-                        Text("عدد الزيارات المتوقعة: ${company.tier.visitsPerCycle}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
+                        Text("عدد الزيارات المتوقعة: ${displayedTier.visitsPerCycle}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
                     }
-                    TierDropdown(company.tier, enabled = state.isAdmin) { tier -> onUpdateTier(company.id, tier) }
+                    TierDropdown(displayedTier, enabled = state.isAdmin && editMode) { tier ->
+                        pendingTiers = pendingTiers + (company.id to tier)
+                    }
                 }
             }
         }

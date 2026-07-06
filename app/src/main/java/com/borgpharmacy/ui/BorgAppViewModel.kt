@@ -92,9 +92,8 @@ class BorgAppViewModel(
     }
 
     fun saveEvaluationsAndSchedule() = adminOnly {
-        repository.rescheduleCurrentCycle()
         refreshReports()
-        snackbar("تم حفظ التقييمات وتوليد جدول دورة 28 يومًا")
+        snackbar("تم حفظ تعديلات التقييم مع الحفاظ التام على ترتيب الجدول")
     }
 
     fun deleteCompany(companyId: String) = adminOnly {

@@ -20,6 +20,7 @@ import com.borgpharmacy.domain.CycleCalculator
 import com.borgpharmacy.domain.PrintCount
 import com.borgpharmacy.domain.Representative
 import com.borgpharmacy.domain.ScheduleGenerator
+import com.borgpharmacy.domain.Shift
 import com.borgpharmacy.domain.Tier
 import com.borgpharmacy.domain.UserAccount
 import com.borgpharmacy.domain.UserRole
@@ -66,6 +67,13 @@ interface BorgRepository {
 }
 
 private const val SESSION_USER_ID_KEY = "session_user_id"
+
+private data class StableSlot(
+    val date: LocalDate,
+    val shift: Shift,
+    val slotIndex: Int,
+    val score: Int,
+)
 
 class OfflineFirstBorgRepository(
     private val db: BorgDatabase,
@@ -182,9 +190,77 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun updateCompanyTier(companyId: String, tier: Tier) {
-        db.companyDao().updateTier(companyId, tier.name)
+        db.withTransaction {
+            db.companyDao().updateTier(companyId, tier.name)
+            adjustCompanyVisitsForTier(companyId, tier)
+        }
         afterMutation("tier")
     }
+
+    private suspend fun adjustCompanyVisitsForTier(companyId: String, tier: Tier) {
+        val start = cycleStart()
+        val currentEpoch = start.toEpochDay()
+        val expected = tier.visitsPerCycle
+        val allVisits = db.visitDao().listCycle(currentEpoch).map { it.toDomain() }
+        val companyVisits = allVisits
+            .filter { it.companyId == companyId }
+            .sortedWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal }.thenBy { it.slotIndex })
+
+        when {
+            companyVisits.size > expected -> {
+                val deleteIds = companyVisits.takeLast(companyVisits.size - expected).map { it.id }
+                if (deleteIds.isNotEmpty()) db.visitDao().softDeleteByIds(deleteIds)
+            }
+            companyVisits.size < expected -> {
+                val additions = mutableListOf<Visit>()
+                repeat(expected - companyVisits.size) { index ->
+                    val occupied = allVisits + additions
+                    val slot = chooseStableInsertionSlot(start, companyId, occupied)
+                    val dayOfCycle = cycleCalculator.dayOfCycle(start, slot.date)
+                    additions += Visit(
+                        id = UUID.nameUUIDFromBytes("$companyId-$currentEpoch-added-${slot.date}-${slot.shift}-${slot.slotIndex}-${companyVisits.size + index + 1}".toByteArray()).toString(),
+                        companyId = companyId,
+                        cycleStartEpochDay = currentEpoch,
+                        dayOfCycle = dayOfCycle,
+                        weekOfCycle = cycleCalculator.weekOfCycle(dayOfCycle),
+                        date = slot.date,
+                        shift = slot.shift,
+                        slotIndex = slot.slotIndex,
+                    )
+                }
+                if (additions.isNotEmpty()) db.visitDao().upsertAll(additions.map { it.toEntity() })
+            }
+        }
+    }
+
+    private fun chooseStableInsertionSlot(
+        cycleStart: LocalDate,
+        companyId: String,
+        occupied: List<Visit>,
+    ): StableSlot {
+        val candidates = cycleCalculator.workingDatesInCycle(cycleStart).flatMap { date ->
+            Shift.entries.mapNotNull { shift ->
+                if (occupied.any { it.companyId == companyId && it.date == date }) return@mapNotNull null
+                val visitsInShift = occupied.filter { it.date == date && it.shift == shift }
+                if (visitsInShift.size >= 10) return@mapNotNull null
+                val preferredMax = if (shift == Shift.MORNING) 7 else 8
+                val preferredSlot = firstVacantSlot(visitsInShift.map { it.slotIndex }.toSet(), preferredMax)
+                val overflowSlot = firstVacantSlot(visitsInShift.map { it.slotIndex }.toSet(), 10)
+                val slotIndex = preferredSlot ?: overflowSlot ?: return@mapNotNull null
+                val overflowPenalty = if (preferredSlot == null) 10_000 else 0
+                StableSlot(
+                    date = date,
+                    shift = shift,
+                    slotIndex = slotIndex,
+                    score = overflowPenalty + (visitsInShift.size * 100) + slotIndex + (if (shift == Shift.MORNING) 5 else 0),
+                )
+            }
+        }
+        return candidates.minWithOrNull(compareBy<StableSlot> { it.score }.thenBy { it.date }.thenBy { it.shift.ordinal })
+            ?: error("لا توجد مساحة متاحة لإضافة زيارة جديدة حتى سعة 10 شركات في الفترة")
+    }
+
+    private fun firstVacantSlot(used: Set<Int>, maxSlot: Int): Int? = (1..maxSlot).firstOrNull { it !in used }
 
     override suspend fun deleteCompany(companyId: String) {
         db.withTransaction {
