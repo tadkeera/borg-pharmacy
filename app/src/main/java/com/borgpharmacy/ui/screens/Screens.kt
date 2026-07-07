@@ -57,6 +57,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -288,13 +289,16 @@ private fun LockScreen(
                 Image(painter = painterResource(R.drawable.borg_logo), contentDescription = null, modifier = Modifier.size(130.dp))
                 Text("تفعيل نظام صيدلية برج الأطباء", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
                 if (state.mustChangePasscodeUser == null) {
-                    OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("اسم المستخدم") }, leadingIcon = { Icon(Icons.Default.Lock, null) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = passcode, onValueChange = { passcode = it }, label = { Text("كود التفعيل / كلمة المرور") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+        colors = borgTextFieldColors(),value = username, onValueChange = { username = it }, label = { Text("اسم المستخدم") }, leadingIcon = { Icon(Icons.Default.Lock, null) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+        colors = borgTextFieldColors(),value = passcode, onValueChange = { passcode = it }, label = { Text("كود التفعيل / كلمة المرور") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Button(onClick = { onLogin(username, passcode) }, modifier = Modifier.fillMaxWidth()) { Text("دخول") }
                     Text("الكود الافتراضي للمدير: admin2026 ويجب تغييره فورًا عند أول دخول", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                 } else {
                     Text("لأمان النظام يجب تغيير كود المدير الافتراضي الآن.", fontWeight = FontWeight.SemiBold, color = BorgRed)
-                    OutlinedTextField(value = newPasscode, onValueChange = { newPasscode = it }, label = { Text("الكود الجديد") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+        colors = borgTextFieldColors(),value = newPasscode, onValueChange = { newPasscode = it }, label = { Text("الكود الجديد") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Button(onClick = { onChangeForcedPasscode(newPasscode) }, modifier = Modifier.fillMaxWidth()) { Text("حفظ الكود الجديد") }
                 }
                 state.loginError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -682,7 +686,7 @@ private fun CompanyProfilesScreen(
         AlertDialog(
             onDismissRequest = { showDeleteAllConfirm = false },
             title = { Text("تأكيد حذف جميع الشركات") },
-            text = { Text("سيتم حذف جميع الشركات والمندوبين وجميع الزيارات المرتبطة بها. لا يتم تحريك أي جدول آخر، وسيتم إنشاء نسخة احتياطية تلقائيًا. هل تريد المتابعة؟") },
+            text = { Text("سيتم حذف جميع الشركات والمندوبين وجميع الزيارات المرتبطة بها. لا يتم تحريك أي جدول آخر. إذا رغبت بالاحتفاظ بنسخة، اضغط زر النسخ الاحتياطي اليدوي قبل الحذف. هل تريد المتابعة؟") },
             confirmButton = {
                 Button(onClick = { showDeleteAllConfirm = false; onDeleteAllCompanies() }) { Text("نعم، حذف الكل") }
             },
@@ -698,7 +702,8 @@ private fun CompanyProfilesScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SearchBox(query, { query = it }, "ابحث عن شركة")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = newCompany, onValueChange = { newCompany = it }, label = { Text("اسم شركة جديدة") }, enabled = state.isAdmin, modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+        colors = borgTextFieldColors(),value = newCompany, onValueChange = { newCompany = it }, label = { Text("اسم شركة جديدة") }, enabled = state.isAdmin, modifier = Modifier.weight(1f))
                     Button(onClick = { onAddCompany(newCompany); newCompany = "" }, enabled = state.isAdmin) { Text("إضافة") }
                 }
                 OutlinedButton(onClick = onImportCsv, enabled = state.isAdmin) { Icon(Icons.Default.UploadFile, null); Spacer(Modifier.width(6.dp)); Text("استيراد CSV") }
@@ -728,11 +733,12 @@ private fun CompanyProfileCard(
     onDeleteRepresentative: (String) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    var editNameMode by rememberSaveable(company.id) { mutableStateOf(false) }
+    var showEditNamePopup by rememberSaveable(company.id) { mutableStateOf(false) }
     var editedName by rememberSaveable(company.id) { mutableStateOf(company.name) }
     var showDeleteConfirm by rememberSaveable(company.id) { mutableStateOf(false) }
-    var repName by rememberSaveable { mutableStateOf("") }
-    var repPhone by rememberSaveable { mutableStateOf("+967") }
+    var showRepPopup by rememberSaveable(company.id) { mutableStateOf(false) }
+    var repName by rememberSaveable(company.id) { mutableStateOf("") }
+    var repPhone by rememberSaveable(company.id) { mutableStateOf("+967") }
 
     if (showDeleteConfirm) {
         AlertDialog(
@@ -750,43 +756,92 @@ private fun CompanyProfileCard(
 
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    if (editNameMode) {
+            if (showEditNamePopup) {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = SoftBlue),
+                    border = BorderStroke(1.dp, BorgBlue.copy(alpha = 0.25f)),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("تعديل اسم الشركة", color = DeepNavy, fontWeight = FontWeight.ExtraBold)
                         OutlinedTextField(
+                            colors = borgTextFieldColors(),
                             value = editedName,
                             onValueChange = { editedName = it },
                             label = { Text("اسم الشركة") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                    } else {
-                        Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { onUpdateCompanyName(company.id, editedName); showEditNamePopup = false }) { Text("حفظ التعديلات") }
+                            OutlinedButton(onClick = { editedName = company.name; showEditNamePopup = false }) { Text("رجوع") }
+                        }
                     }
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(company.name, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
                     Text("المعرف ثابت: ${company.id.take(8)} • ${company.tier.arabicLabel()}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
                 }
-                if (editNameMode) {
-                    TextButton(onClick = { onUpdateCompanyName(company.id, editedName); editNameMode = false }) { Text("حفظ التعديل") }
-                    TextButton(onClick = { editedName = company.name; editNameMode = false }) { Text("إلغاء") }
-                } else {
-                    TextButton(onClick = { editedName = company.name; editNameMode = true }, enabled = state.isAdmin) { Text("تعديل") }
-                }
+                TextButton(onClick = { editedName = company.name; showEditNamePopup = true }, enabled = state.isAdmin) { Text("تعديل") }
                 TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "إخفاء المندوبين" else "المندوبون") }
                 IconButton(onClick = { showDeleteConfirm = true }, enabled = state.isAdmin) { Icon(Icons.Default.Delete, contentDescription = "حذف") }
             }
             if (expanded) {
                 val reps = state.repsByCompany[company.id].orEmpty()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { showRepPopup = true }, enabled = state.isAdmin) { Text("إضافة مندوب") }
+                    Text("عدد المندوبين: ${reps.size}", color = Color(0xFF697386), style = MaterialTheme.typography.bodySmall)
+                }
+
+                if (showRepPopup) {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FBFF)),
+                        border = BorderStroke(1.dp, BorgBlue.copy(alpha = 0.20f)),
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("إضافة مندوب لشركة ${company.name}", color = DeepNavy, fontWeight = FontWeight.Bold)
+                            OutlinedTextField(
+                                colors = borgTextFieldColors(),
+                                value = repName,
+                                onValueChange = { repName = it },
+                                label = { Text("اسم المندوب") },
+                                enabled = state.isAdmin,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                colors = borgTextFieldColors(),
+                                value = repPhone,
+                                onValueChange = { repPhone = it },
+                                label = { Text("رقم المندوب") },
+                                enabled = state.isAdmin,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        onAddRepresentative(company.id, repName, repPhone)
+                                        repName = ""
+                                        repPhone = "+967"
+                                    },
+                                    enabled = state.isAdmin,
+                                ) { Text("حفظ") }
+                                OutlinedButton(onClick = { showRepPopup = false }) { Text("رجوع إلى القائمة") }
+                            }
+                        }
+                    }
+                }
+
                 reps.forEach { rep ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         Text("${rep.name} • ${rep.phone}", modifier = Modifier.weight(1f), color = DeepNavy)
                         IconButton(onClick = { onDeleteRepresentative(rep.id) }, enabled = state.isAdmin) { Icon(Icons.Default.Delete, null) }
                     }
-                }
-                HorizontalDivider()
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = repName, onValueChange = { repName = it }, label = { Text("اسم المندوب") }, enabled = state.isAdmin, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = repPhone, onValueChange = { repPhone = it }, label = { Text("الهاتف") }, enabled = state.isAdmin, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onAddRepresentative(company.id, repName, repPhone); repName = ""; repPhone = "+967" }, enabled = state.isAdmin) { Icon(Icons.Default.Save, null, tint = BorgBlue) }
                 }
             }
         }
@@ -845,8 +900,10 @@ private fun DashboardScreen(state: BorgUiState, modifier: Modifier) {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = from, onValueChange = { from = it }, label = { Text("من") }, modifier = Modifier.weight(1f))
-                OutlinedTextField(value = to, onValueChange = { to = it }, label = { Text("إلى") }, modifier = Modifier.weight(1f))
+                OutlinedTextField(
+        colors = borgTextFieldColors(),value = from, onValueChange = { from = it }, label = { Text("من") }, modifier = Modifier.weight(1f))
+                OutlinedTextField(
+        colors = borgTextFieldColors(),value = to, onValueChange = { to = it }, label = { Text("إلى") }, modifier = Modifier.weight(1f))
             }
         }
         item { ReportCard("1. الشركات الملتزمة", compliant.map { "${it.company.name}: ${"%.1f".format(it.scoreOutOf10)}/10" }) }
@@ -894,9 +951,12 @@ private fun UserManagementCard(state: BorgUiState, onCreateUser: (String, String
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("إدارة المستخدمين - للمدير فقط", fontWeight = FontWeight.ExtraBold, color = DeepNavy)
             state.users.forEach { user -> AssistChip(onClick = {}, label = { Text("${user.username} • ${user.role.arabicLabel()}") }) }
-            OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("اسم المستخدم") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = displayName, onValueChange = { displayName = it }, label = { Text("الاسم الظاهر") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = passcode, onValueChange = { passcode = it }, label = { Text("كلمة المرور") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+        colors = borgTextFieldColors(),value = username, onValueChange = { username = it }, label = { Text("اسم المستخدم") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+        colors = borgTextFieldColors(),value = displayName, onValueChange = { displayName = it }, label = { Text("الاسم الظاهر") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+        colors = borgTextFieldColors(),value = passcode, onValueChange = { passcode = it }, label = { Text("كلمة المرور") }, modifier = Modifier.fillMaxWidth())
             RoleDropdown(UserRole.valueOf(role)) { role = it.name }
             Button(onClick = { onCreateUser(username, displayName, UserRole.valueOf(role), passcode); username = ""; displayName = ""; passcode = "" }) {
                 Icon(Icons.Default.PersonAdd, null); Spacer(Modifier.width(6.dp)); Text("إنشاء مستخدم")
@@ -952,8 +1012,21 @@ private fun ExportDropdown(label: String, onExport: (String) -> Unit) {
 private fun List<Visit>.displaySorted(): List<Visit> = sortedWith(compareBy<Visit> { it.createdAt }.thenBy { it.id })
 
 @Composable
+private fun borgTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = DeepNavy,
+    unfocusedTextColor = DeepNavy,
+    disabledTextColor = DeepNavy.copy(alpha = 0.55f),
+    cursorColor = BorgBlue,
+    focusedBorderColor = BorgBlue,
+    unfocusedBorderColor = Color(0xFFB8C5D6),
+    focusedLabelColor = BorgBlue,
+    unfocusedLabelColor = DeepNavy,
+)
+
+@Composable
 private fun SearchBox(value: String, onValueChange: (String) -> Unit, label: String) {
     OutlinedTextField(
+        colors = borgTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },

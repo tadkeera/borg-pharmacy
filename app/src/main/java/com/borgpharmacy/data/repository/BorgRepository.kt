@@ -91,7 +91,6 @@ class OfflineFirstBorgRepository(
         backupService.ensureDirectories()
         seedDefaultAdmin()
         val start = cycleStart()
-        backupService.dumpDatabase("launch")
         scope.launch { syncNow() }
         return start
     }
@@ -401,7 +400,6 @@ class OfflineFirstBorgRepository(
                 val generatedVisits = db.visitDao().dirty()
                 syncService.pushVisits(generatedVisits)
                 if (generatedVisits.isNotEmpty()) db.visitDao().markClean(generatedVisits.map { it.id })
-                backupService.dumpDatabase("cycle_rotation")
             }
         } catch (throwable: Throwable) {
             Log.w("BorgSync", "Cloud sync skipped/failed; local cache remains authoritative", throwable)
@@ -473,7 +471,8 @@ class OfflineFirstBorgRepository(
     }
 
     private fun afterMutation(reason: String) {
-        scope.launch { backupService.dumpDatabase(reason) }
+        // Backups are now manual only to avoid filling device storage with thousands of files.
+        // The reason is kept for future audit/logging use.
         scope.launch { syncNow() }
     }
 }
