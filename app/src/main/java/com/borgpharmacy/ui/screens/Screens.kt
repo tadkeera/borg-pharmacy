@@ -370,44 +370,43 @@ private fun HomeHeroCard(
 ) {
     Card(
         Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
     ) {
-        Box(
+        Column(
             Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(listOf(DeepNavy, BorgBlue, Color(0xFF2177C7))),
-                    RoundedCornerShape(30.dp),
-                )
+                .background(Brush.linearGradient(listOf(Color(0xFF245BC7), Color(0xFF2F91F1))), RoundedCornerShape(28.dp))
                 .padding(18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                date.format(arabicLongDateFormatter),
+                color = Color.White,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center,
+            )
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White.copy(alpha = 0.16f))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        "جدول زيارات اليوم",
-                        color = Color.White,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedButton(onClick = onSync) {
-                        Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White)
-                        Spacer(Modifier.width(6.dp))
-                        Text("مزامنة", color = Color.White)
-                    }
+                    Text("جدول زيارات اليوم", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Color.White)
                 }
-                Text(date.format(arabicLongDateFormatter), color = Color.White.copy(alpha = 0.92f), style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     GlassPill("الأسبوع $week")
                     GlassPill("$totalVisits زيارة")
+                    IconButton(onClick = onSync) { Icon(Icons.Default.Sync, contentDescription = "مزامنة", tint = Color.White) }
                 }
-                Text(
-                    "الدورة: ${cycleStart.format(shortDateFormatter)} إلى ${cycleEnd.format(shortDateFormatter)}",
-                    color = Color.White.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Text("الدورة: من ${cycleStart.format(shortDateFormatter)} إلى ${cycleEnd.format(shortDateFormatter)}", color = Color.White.copy(alpha = 0.88f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             }
         }
     }
@@ -443,28 +442,19 @@ private fun CreativeShiftTable(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(50.dp)
-                        .clip(CircleShape)
-                        .background(softAccent),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(visits.size.toString(), color = accent, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Box(Modifier.size(62.dp).clip(CircleShape).background(softAccent), contentAlignment = Alignment.Center) {
+                    Text(if (title.contains("الصباحية")) "☀️" else "🌙", style = MaterialTheme.typography.headlineSmall)
                 }
                 Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = DeepNavy)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                    Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold, color = Color(0xFF071F3A))
+                    Text("${visits.size} شركة", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF697386), fontWeight = FontWeight.Bold)
                 }
-                Text("الشركات", color = accent, fontWeight = FontWeight.Bold)
             }
-
-            ShiftTableHeader(accent)
 
             if (visits.isEmpty()) {
                 EmptyState("لا توجد شركات مجدولة في هذه الفترة اليوم.")
@@ -523,25 +513,26 @@ private fun VisitTableRow(
             .animateContentSize()
             .clickable { onExpand() },
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFCFE)),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.12f)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.20f)),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(42.dp).clip(CircleShape).background(accent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Business, contentDescription = null, tint = accent)
+                }
+                Spacer(Modifier.width(10.dp))
                 Text(
                     company.name,
                     modifier = Modifier.weight(1f),
                     fontWeight = FontWeight.ExtraBold,
-                    color = DeepNavy,
+                    color = Color.Black,
+                    style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Box(
-                    modifier = Modifier.width(72.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Default.Print, contentDescription = "عرض المندوبين والطباعة", tint = accent)
-                }
+                Box(Modifier.width(7.dp).height(62.dp).clip(RoundedCornerShape(50)).background(accent))
             }
 
             if (expanded) {
