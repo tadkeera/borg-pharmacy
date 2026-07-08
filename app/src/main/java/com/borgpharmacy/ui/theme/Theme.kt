@@ -9,7 +9,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import com.borgpharmacy.R
 
 private val BorgBlue = Color(0xFF0E4D8F)
 private val BorgRed = Color(0xFFC8172B)
@@ -30,27 +33,31 @@ private val DarkColors: ColorScheme = darkColorScheme(
     tertiary = Color(0xFFC8CDD5),
 )
 
-// Uses Android's bundled Arabic-capable Noto/Roboto stack, with strong weights and no extra font padding.
-// This gives a modern Cairo/Tajawal-like look without increasing APK size with external font files.
-private val AppFontFamily = FontFamily.SansSerif
+private val CairoBold = FontFamily(
+    Font(R.font.cairo_bold, weight = FontWeight.Bold),
+)
+
 private val AppTypography = Typography().let { base ->
-    fun TextStyle.withAppFont() = copy(fontFamily = AppFontFamily)
+    fun TextStyle.withCairoBold() = copy(
+        fontFamily = CairoBold,
+        fontWeight = FontWeight.Bold,
+    )
     Typography(
-        displayLarge = base.displayLarge.withAppFont(),
-        displayMedium = base.displayMedium.withAppFont(),
-        displaySmall = base.displaySmall.withAppFont(),
-        headlineLarge = base.headlineLarge.withAppFont(),
-        headlineMedium = base.headlineMedium.withAppFont(),
-        headlineSmall = base.headlineSmall.withAppFont(),
-        titleLarge = base.titleLarge.withAppFont(),
-        titleMedium = base.titleMedium.withAppFont(),
-        titleSmall = base.titleSmall.withAppFont(),
-        bodyLarge = base.bodyLarge.withAppFont(),
-        bodyMedium = base.bodyMedium.withAppFont(),
-        bodySmall = base.bodySmall.withAppFont(),
-        labelLarge = base.labelLarge.withAppFont(),
-        labelMedium = base.labelMedium.withAppFont(),
-        labelSmall = base.labelSmall.withAppFont(),
+        displayLarge = base.displayLarge.withCairoBold(),
+        displayMedium = base.displayMedium.withCairoBold(),
+        displaySmall = base.displaySmall.withCairoBold(),
+        headlineLarge = base.headlineLarge.withCairoBold(),
+        headlineMedium = base.headlineMedium.withCairoBold(),
+        headlineSmall = base.headlineSmall.withCairoBold(),
+        titleLarge = base.titleLarge.withCairoBold(),
+        titleMedium = base.titleMedium.withCairoBold(),
+        titleSmall = base.titleSmall.withCairoBold(),
+        bodyLarge = base.bodyLarge.withCairoBold(),
+        bodyMedium = base.bodyMedium.withCairoBold(),
+        bodySmall = base.bodySmall.withCairoBold(),
+        labelLarge = base.labelLarge.withCairoBold(),
+        labelMedium = base.labelMedium.withCairoBold(),
+        labelSmall = base.labelSmall.withCairoBold(),
     )
 }
 

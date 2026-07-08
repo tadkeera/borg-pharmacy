@@ -89,6 +89,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.borgpharmacy.R
 import com.borgpharmacy.domain.Company
 import com.borgpharmacy.domain.Representative
@@ -229,7 +230,6 @@ fun BorgApp(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BorgTopBar(state: BorgUiState, onLogout: () -> Unit) {
-    val cycleMonth = state.cycleInfo.currentCycleStart.format(arabicMonthFormatter)
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = Color.White,
@@ -237,23 +237,24 @@ private fun BorgTopBar(state: BorgUiState, onLogout: () -> Unit) {
             actionIconContentColor = DeepNavy,
         ),
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painter = painterResource(R.drawable.borg_logo), contentDescription = null, modifier = Modifier.size(46.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Image(painter = painterResource(R.drawable.borg_logo), contentDescription = null, modifier = Modifier.size(48.dp))
                 Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("صيدلية برج الأطباء", fontWeight = FontWeight.ExtraBold, color = DeepNavy)
-                    Text(
-                        "الدورة الحالية: $cycleMonth - الأسبوع ${state.cycleInfo.weekOfCycle} [شبكة تدوير عادلة] • التاريخ الفعلي: ${state.cycleInfo.today.format(shortDateFormatter)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF526070),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    "صيدلية برج الأطباء",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = DeepNavy,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontSize = 22.sp,
+                    maxLines = 1,
+                )
             }
         },
         actions = {
-            Text(state.currentUser?.role?.arabicLabel().orEmpty(), style = MaterialTheme.typography.labelMedium, color = BorgBlue)
             IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, contentDescription = "تسجيل الخروج") }
         },
     )
@@ -512,27 +513,36 @@ private fun VisitTableRow(
             .fillMaxWidth()
             .animateContentSize()
             .clickable { onExpand() },
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.20f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        border = BorderStroke(2.dp, accent.copy(alpha = 0.78f)),
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(42.dp).clip(CircleShape).background(accent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Business, contentDescription = null, tint = accent)
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp),
+                ) {
+                    Box(Modifier.size(42.dp).clip(CircleShape).background(accent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Business, contentDescription = null, tint = accent)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        company.name,
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.Black,
+                        fontSize = 16.sp,
+                        textAlign = TextAlign.Right,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Box(Modifier.width(7.dp).height(58.dp).clip(RoundedCornerShape(50)).background(accent))
                 }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    company.name,
-                    modifier = Modifier.weight(1f),
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.Black,
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Box(Modifier.width(7.dp).height(62.dp).clip(RoundedCornerShape(50)).background(accent))
             }
 
             if (expanded) {
