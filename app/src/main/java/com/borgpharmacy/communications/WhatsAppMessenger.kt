@@ -7,11 +7,8 @@ import com.borgpharmacy.domain.Company
 import com.borgpharmacy.domain.Representative
 import com.borgpharmacy.domain.Visit
 import com.borgpharmacy.domain.borgArabicName
-import java.time.format.DateTimeFormatter
 
 class WhatsAppMessenger(private val context: Context) {
-    private val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-
     fun openItinerary(company: Company, representative: Representative, visits: List<Visit>) {
         val normalizedPhone = representative.phone
             .replace("+", "")
@@ -27,23 +24,26 @@ class WhatsAppMessenger(private val context: Context) {
 
     fun buildMessage(company: Company, representative: Representative, visits: List<Visit>): String {
         val itinerary = if (visits.isEmpty()) {
-            "لا توجد زيارات مجدولة حاليًا."
+            "•   *لا توجد زيارات مجدولة حاليًا.*"
         } else {
             visits.sortedWith(compareBy<Visit> { it.weekOfCycle }.thenBy { it.date }.thenBy { it.shift.ordinal })
                 .joinToString("\n") { visit ->
-                    "- الأسبوع ${visit.weekOfCycle}: ${visit.date.format(formatter)} (${visit.date.dayOfWeek.borgArabicName()}) - ${visit.shift.arabicName}"
+                    "•   *الأسبوع ${visit.weekOfCycle}:  (${visit.date.dayOfWeek.borgArabicName()}) - ${visit.shift.arabicName}*"
                 }
         }
-        return """
-            صيدلية برج الأطباء - إدارة الصيدلية
-            الأخ/الأخت ${representative.name}
-            شركة: ${company.name}
-            التصنيف: ${company.tier.label}
 
-            جدول الزيارات للدورة الحالية:
+        return """
+            *صيدلية برج الأطباء - إدارة الصيدلية*
+
+            *د/  ${representative.name}*
+
+            *شركة: ${company.name}*
+
+            *جدول الزيارات*
+
             $itinerary
 
-            يرجى الالتزام بالموعد المحدد وإحضار التعريف المهني.
+            *يرجى الالتزام بالموعد المحدد.*
         """.trimIndent()
     }
 }
