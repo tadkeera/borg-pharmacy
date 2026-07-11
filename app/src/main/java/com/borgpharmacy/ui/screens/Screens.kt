@@ -61,6 +61,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -72,6 +73,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -123,6 +125,7 @@ private enum class Route(val label: String, val icon: ImageVector) {
     WEEKLY("الأسابيع", Icons.Default.CalendarMonth),
     COMPANIES("الشركات", Icons.Default.Business),
     ENQUIRIES("التواصل", Icons.Default.Send),
+    BOT("بوت واتساب", Icons.Default.Sync),
     DASHBOARD("التقارير", Icons.Default.Assessment),
     SETTINGS("الإعدادات", Icons.Default.Settings),
 }
@@ -212,6 +215,7 @@ fun BorgApp(
                     modifier = contentModifier,
                 )
                 Route.ENQUIRIES -> EnquiriesScreen(state, onWhatsApp, contentModifier)
+                Route.BOT -> WhatsAppBotScreen(state = state, modifier = contentModifier)
                 Route.DASHBOARD -> DashboardScreen(state, contentModifier)
                 Route.SETTINGS -> SettingsScreen(
                     state = state,
@@ -873,6 +877,110 @@ private fun EnquiriesScreen(
                                 Text(rep.phone, style = MaterialTheme.typography.bodySmall, color = Color(0xFF697386))
                             }
                             IconButton(onClick = { onWhatsApp(company, rep) }) { Icon(Icons.Default.Send, contentDescription = "واتساب", tint = Color(0xFF128C7E)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+data class BotLog(
+    val id: String,
+    val senderPhone: String,
+    val queryText: String,
+    val matchedCompany: String,
+    val createdAt: String,
+)
+
+@Composable
+private fun WhatsAppBotScreen(state: BorgUiState, modifier: Modifier) {
+    var botPhone by rememberSaveable { mutableStateOf("967") }
+    var botActive by rememberSaveable { mutableStateOf(false) }
+    var statusMessage by rememberSaveable { mutableStateOf("لم يتم إرسال كود ربط بعد") }
+    val logs = remember { mutableStateListOf<BotLog>() }
+
+    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            HeaderCard(
+                title = "بوت واتساب",
+                subtitle = "إعداد رقم البوت ومتابعة سجل استعلامات مندوبي الشركات.",
+                gradient = listOf(Color(0xFF128C7E), Color(0xFF25D366)),
+            )
+        }
+        item {
+            BotSettingsScreen(
+                currentPhone = botPhone,
+                isActive = botActive,
+                canEdit = state.isAdmin,
+                statusMessage = statusMessage,
+                onSaveSettings = { phone, active ->
+                    val cleanPhone = phone.filter { it.isDigit() }.ifBlank { "967" }
+                    botPhone = cleanPhone
+                    botActive = active
+                    statusMessage = if (active) "تم حفظ الرقم $cleanPhone، وسيطلب البوت كود ربط جديد لهذا الرقم." else "تم حفظ الرقم $cleanPhone مع إيقاف البوت مؤقتًا."
+                },
+            )
+        }
+        item { BotLogsReportScreen(logs = logs) }
+    }
+}
+
+@Composable
+fun BotSettingsScreen(
+    currentPhone: String,
+    isActive: Boolean,
+    canEdit: Boolean = true,
+    statusMessage: String = "",
+    onSaveSettings: (phone: String, active: Boolean) -> Unit,
+) {
+    var phoneInput by remember(currentPhone) { mutableStateOf(currentPhone) }
+    var activeState by remember(isActive) { mutableStateOf(isActive) }
+
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("إعدادات بوت الواتساب", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0E4D8F))
+            Text("عند تغيير الرقم وحفظ الإعدادات، سيقوم البوت تلقائياً بطلب كود ربط جديد للرقم المدخل.", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF526070))
+            OutlinedTextField(
+                colors = borgTextFieldColors(),
+                value = phoneInput,
+                onValueChange = { phoneInput = it.filter { char -> char.isDigit() } },
+                label = { Text("رقم هاتف البوت (بدون +)") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = canEdit,
+                singleLine = true,
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("تفعيل البوت", fontWeight = FontWeight.Bold, color = DeepNavy)
+                Switch(checked = activeState, onCheckedChange = { activeState = it }, enabled = canEdit)
+            }
+            if (statusMessage.isNotBlank()) Text(statusMessage, color = if (activeState) Color(0xFF2FA66A) else Color(0xFF697386), style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { onSaveSettings(phoneInput, activeState) }, modifier = Modifier.fillMaxWidth(), enabled = canEdit) { Text("حفظ وإرسال كود الربط") }
+            if (!canEdit) Text("هذه الإعدادات للمدير فقط.", color = BorgRed, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+fun BotLogsReportScreen(logs: List<BotLog>) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(text = "سجل استعلامات المناديب", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0E4D8F))
+            if (logs.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) { Text("لا توجد استعلامات مسجلة حتى الآن.", color = Color(0xFF697386)) }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    logs.forEach { log ->
+                        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FBFF)), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(text = "رقم المرسل: ${log.senderPhone}", fontWeight = FontWeight.Bold, color = DeepNavy)
+                                    Text(text = log.createdAt, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(text = "النص المرسل: \"${log.queryText}\"", color = DeepNavy)
+                                Text(text = "الشركة المطابقة: ${log.matchedCompany}", fontWeight = FontWeight.Bold, color = Color(0xFF2FA66A))
+                            }
                         }
                     }
                 }
