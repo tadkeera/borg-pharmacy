@@ -1,5 +1,6 @@
 package com.borgpharmacy.ui
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -161,36 +162,50 @@ class BorgAppViewModel(
         snackbar("تم طلب المزامنة السحابية")
     }
 
-    fun refreshBotSettings() = viewModelScope.launch {
-        val (phone, active) = repository.fetchBotConfig()
-        val logs = repository.fetchBotLogs()
-        _state.update {
-            it.copy(
-                botPhone = phone,
-                botActive = active,
-                botLogs = logs,
-                botStatusMessage = if (active) "البوت مفعل على الرقم $phone" else "البوت غير مفعل",
-            )
+    // 🟢 تحديث حذر ومحمي بالكامل لتقارير وإعدادات البوت
+    fun refreshBotSettings() {
+        viewModelScope.launch {
+            try {
+                val config = repository.fetchBotConfig()
+                val logs = repository.fetchBotLogs()
+                _state.update {
+                    it.copy(
+                        botPhone = config.first,
+                        botActive = config.second,
+                        botLogs = logs,
+                        botStatusMessage = if (config.second) "البوت مفعل على الرقم ${config.first}" else "البوت غير مفعل"
+                    )
+                }
+            } catch (t: Throwable) {
+                Log.e("BorgViewModel", "Failed to refresh bot", t)
+                snackbar("فشل تحديث بيانات البوت السحابية")
+            }
         }
     }
 
+    // 🟢 تشغيل مباشر بدون تداخل خيوط العمل ( viewModelScope.launch ) لضمان الاستقرار التام
     fun saveBotSettings(phone: String, active: Boolean) = adminOnly {
-        val normalizedPhone = phone.filter { it.isDigit() }.ifBlank { "967" }
-        repository.saveBotConfig(normalizedPhone, active)
-        val logs = repository.fetchBotLogs()
-        _state.update {
-            it.copy(
-                botPhone = normalizedPhone,
-                botActive = active,
-                botLogs = logs,
-                botStatusMessage = if (active) {
-                    "تم حفظ الرقم $normalizedPhone، وسيطلب البوت كود ربط جديد لهذا الرقم."
-                } else {
-                    "تم حفظ الرقم $normalizedPhone مع إيقاف البوت مؤقتًا."
-                },
-            )
+        try {
+            val normalizedPhone = phone.filter { it.isDigit() }.ifBlank { "967" }
+            repository.saveBotConfig(normalizedPhone, active)
+            val logs = repository.fetchBotLogs()
+            _state.update {
+                it.copy(
+                    botPhone = normalizedPhone,
+                    botActive = active,
+                    botLogs = logs,
+                    botStatusMessage = if (active) {
+                        "تم حفظ الرقم $normalizedPhone، وسيطلب البوت كود ربط جديد لهذا الرقم."
+                    } else {
+                        "تم حفظ الرقم $normalizedPhone مع إيقاف البوت مؤقتًا."
+                    }
+                )
+            }
+            snackbar("تم حفظ إعدادات بوت واتساب في Supabase")
+        } catch (t: Throwable) {
+            Log.e("BorgViewModel", "Failed to save bot config", t)
+            snackbar("فشل حفظ إعدادات البوت سحابياً: ${t.localizedMessage ?: "خطأ غير معروف"}")
         }
-        snackbar("تم حفظ إعدادات بوت واتساب في Supabase")
     }
 
     fun clearSnackbar() = _state.update { it.copy(message = null) }
@@ -227,10 +242,12 @@ data class BorgUiState(
     val tierCounts: List<TierCountTuple> = emptyList(),
     val dashboardScores: List<CompanyReportScore> = emptyList(),
     val message: String? = null,
+    
+    // 🟢 متغيرات البوت الجديدة
     val botPhone: String = "967",
     val botActive: Boolean = false,
     val botStatusMessage: String = "",
-    val botLogs: List<BotLog> = emptyList(),
+    val botLogs: List<BotLog> = emptyList()
 ) {
     val isUnlocked: Boolean get() = currentUser != null && mustChangePasscodeUser == null
     val isAdmin: Boolean get() = currentUser?.role == UserRole.ADMIN

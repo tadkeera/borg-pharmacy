@@ -38,6 +38,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.util.UUID
 
@@ -121,9 +122,6 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun cycleStart(): LocalDate {
-        // Borg Pharmacy fixed 28-day cycle anchor:
-        // Saturday 04 July 2026 is treated as Day 1 / Week 1.
-        // Every 28 days the same four-week table rotates, regardless of calendar month.
         val fixedBaseline = LocalDate.of(2026, 7, 4)
         val currentCycleStart = cycleCalculator.currentCycle(fixedBaseline, LocalDate.now()).currentCycleStart
         db.appSettingsDao().set(AppSettingEntity("fixed_cycle_baseline_epoch_day", fixedBaseline.toEpochDay().toString()))
@@ -490,8 +488,9 @@ class OfflineFirstBorgRepository(
         }
     }
 
-    override suspend fun fetchBotConfig(): Pair<String, Boolean> {
-        return try {
+    // 🟢 فرض استخدام Dispatchers.IO بشكل صارم لتجنب أي تعليق في الواجهة الرئيسية
+    override suspend fun fetchBotConfig(): Pair<String, Boolean> = withContext(Dispatchers.IO) {
+        try {
             val configs = SupabaseClientProvider.client
                 .from("bot_config")
                 .select()
@@ -504,7 +503,7 @@ class OfflineFirstBorgRepository(
         }
     }
 
-    override suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean) {
+    override suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean) = withContext(Dispatchers.IO) {
         try {
             val normalizedPhone = phoneNumber.filter { it.isDigit() }.ifBlank { "967" }
             SupabaseClientProvider.client
@@ -516,8 +515,8 @@ class OfflineFirstBorgRepository(
         }
     }
 
-    override suspend fun fetchBotLogs(): List<BotLog> {
-        return try {
+    override suspend fun fetchBotLogs(): List<BotLog> = withContext(Dispatchers.IO) {
+        try {
             SupabaseClientProvider.client
                 .from("bot_logs")
                 .select()
@@ -544,8 +543,6 @@ class OfflineFirstBorgRepository(
     }
 
     private fun afterMutation(reason: String) {
-        // Backups are now manual only to avoid filling device storage with thousands of files.
-        // The reason is kept for future audit/logging use.
         scope.launch { syncNow() }
     }
 }
