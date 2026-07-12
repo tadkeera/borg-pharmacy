@@ -503,15 +503,18 @@ class OfflineFirstBorgRepository(
         }
     }
 
-    override suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean) = withContext(Dispatchers.IO) {
-        try {
-            val normalizedPhone = phoneNumber.filter { it.isDigit() }.ifBlank { "967" }
-            SupabaseClientProvider.client
-                .from("bot_config")
-                .upsert(BotConfigDto(phoneNumber = normalizedPhone, isActive = isActive))
-        } catch (throwable: Throwable) {
-            Log.e("BorgBot", "Unable to save bot_config to Supabase", throwable)
-            throw throwable
+    override suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean) {
+        withContext(Dispatchers.IO) {
+            try {
+                val normalizedPhone = phoneNumber.filter { it.isDigit() }.ifBlank { "967" }
+                SupabaseClientProvider.client
+                    .from("bot_config")
+                    .upsert(BotConfigDto(phoneNumber = normalizedPhone, isActive = isActive))
+                Unit
+            } catch (throwable: Throwable) {
+                Log.e("BorgBot", "Unable to save bot_config to Supabase", throwable)
+                throw throwable
+            }
         }
     }
 
