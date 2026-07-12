@@ -84,6 +84,8 @@ class MainActivity : ComponentActivity() {
                 onAddRepresentative = viewModel::addRepresentative,
                 onDeleteRepresentative = viewModel::deleteRepresentative,
                 onCreateUser = viewModel::createUser,
+                onSaveBotSettings = viewModel::saveBotSettings,
+                onRefreshBotData = viewModel::refreshBotSettings,
                 onMarkVisitStatus = viewModel::markVisitStatus,
                 onPrint = { company: Company, rep: Representative, visit: Visit ->
                     printer.printPass(company, rep, visit)

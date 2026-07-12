@@ -65,3 +65,19 @@ exception when duplicate_object then null; end $$;
 do $$ begin
   create policy "borg_visits_write" on public.visits for all using (true) with check (true);
 exception when duplicate_object then null; end $$;
+
+-- WhatsApp bot tables
+create table if not exists public.bot_config (
+  id text primary key default 'primary_bot',
+  phone_number text not null default '967',
+  is_active boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.bot_logs (
+  id uuid primary key default gen_random_uuid(),
+  sender_phone text not null,
+  query_text text not null,
+  matched_company text not null,
+  created_at timestamptz not null default now()
+);

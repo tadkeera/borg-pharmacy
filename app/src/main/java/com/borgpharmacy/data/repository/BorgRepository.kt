@@ -13,6 +13,7 @@ import com.borgpharmacy.data.local.UserEntity
 import com.borgpharmacy.data.local.VisitEntity
 import com.borgpharmacy.data.local.toDomain
 import com.borgpharmacy.data.local.toEntity
+import com.borgpharmacy.data.remote.SupabaseClientProvider
 import com.borgpharmacy.data.remote.SupabaseSyncService
 import com.borgpharmacy.domain.Company
 import com.borgpharmacy.domain.CompanyReportScore
@@ -27,6 +28,10 @@ import com.borgpharmacy.domain.UserRole
 import com.borgpharmacy.domain.Visit
 import com.borgpharmacy.domain.VisitStatus
 import com.borgpharmacy.security.SecurityHasher
+import com.borgpharmacy.ui.screens.BotLog
+import io.github.jan.supabase.postgrest.from
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +40,22 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.util.UUID
+
+@Serializable
+data class BotConfigDto(
+    val id: String = "primary_bot",
+    @SerialName("phone_number") val phoneNumber: String,
+    @SerialName("is_active") val isActive: Boolean,
+)
+
+@Serializable
+data class BotLogDto(
+    val id: String? = null,
+    @SerialName("sender_phone") val senderPhone: String,
+    @SerialName("query_text") val queryText: String,
+    @SerialName("matched_company") val matchedCompany: String,
+    @SerialName("created_at") val createdAt: String? = null,
+)
 
 interface BorgRepository {
     fun observeCompanies(): Flow<List<Company>>
@@ -67,6 +88,10 @@ interface BorgRepository {
     suspend fun syncNow()
     suspend fun backupNow(reason: String = "manual")
     suspend fun dashboardScores(): List<CompanyReportScore>
+
+    suspend fun fetchBotConfig(): Pair<String, Boolean>
+    suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean)
+    suspend fun fetchBotLogs(): List<BotLog>
 }
 
 private const val SESSION_USER_ID_KEY = "session_user_id"
@@ -462,6 +487,54 @@ class OfflineFirstBorgRepository(
             val completed = visits.count { it.companyId == company.id && it.status == VisitStatus.COMPLETED }
             val score = (completed.toDouble() / expected.toDouble()) * 10.0
             CompanyReportScore(company, expected, completed, score.coerceAtMost(10.0))
+        }
+    }
+
+    override suspend fun fetchBotConfig(): Pair<String, Boolean> {
+        return try {
+            val configs = SupabaseClientProvider.client
+                .from("bot_config")
+                .select()
+                .decodeList<BotConfigDto>()
+            val config = configs.firstOrNull { it.id == "primary_bot" } ?: configs.firstOrNull()
+            (config?.phoneNumber ?: "967") to (config?.isActive ?: false)
+        } catch (throwable: Throwable) {
+            Log.w("BorgBot", "Unable to fetch bot_config from Supabase", throwable)
+            "967" to false
+        }
+    }
+
+    override suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean) {
+        try {
+            val normalizedPhone = phoneNumber.filter { it.isDigit() }.ifBlank { "967" }
+            SupabaseClientProvider.client
+                .from("bot_config")
+                .upsert(BotConfigDto(phoneNumber = normalizedPhone, isActive = isActive))
+        } catch (throwable: Throwable) {
+            Log.e("BorgBot", "Unable to save bot_config to Supabase", throwable)
+            throw throwable
+        }
+    }
+
+    override suspend fun fetchBotLogs(): List<BotLog> {
+        return try {
+            SupabaseClientProvider.client
+                .from("bot_logs")
+                .select()
+                .decodeList<BotLogDto>()
+                .sortedByDescending { it.createdAt.orEmpty() }
+                .map { dto ->
+                    BotLog(
+                        id = dto.id.orEmpty(),
+                        senderPhone = dto.senderPhone,
+                        queryText = dto.queryText,
+                        matchedCompany = dto.matchedCompany,
+                        createdAt = dto.createdAt?.take(16)?.replace("T", " ").orEmpty(),
+                    )
+                }
+        } catch (throwable: Throwable) {
+            Log.w("BorgBot", "Unable to fetch bot_logs from Supabase", throwable)
+            emptyList()
         }
     }
 

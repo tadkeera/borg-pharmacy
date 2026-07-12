@@ -17,6 +17,7 @@ import com.borgpharmacy.domain.UserAccount
 import com.borgpharmacy.domain.UserRole
 import com.borgpharmacy.domain.Visit
 import com.borgpharmacy.domain.VisitStatus
+import com.borgpharmacy.ui.screens.BotLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,6 +45,7 @@ class BorgAppViewModel(
                 )
             }
             refreshReports()
+            refreshBotSettings()
         }
         viewModelScope.launch { repository.observeCompanies().collect { value -> _state.update { it.copy(companies = value) } } }
         viewModelScope.launch { repository.observeRepresentatives().collect { value -> _state.update { it.copy(representatives = value) } } }
@@ -155,7 +157,40 @@ class BorgAppViewModel(
 
     fun syncNow() = viewModelScope.launch {
         repository.syncNow()
+        refreshBotSettings()
         snackbar("تم طلب المزامنة السحابية")
+    }
+
+    fun refreshBotSettings() = viewModelScope.launch {
+        val (phone, active) = repository.fetchBotConfig()
+        val logs = repository.fetchBotLogs()
+        _state.update {
+            it.copy(
+                botPhone = phone,
+                botActive = active,
+                botLogs = logs,
+                botStatusMessage = if (active) "البوت مفعل على الرقم $phone" else "البوت غير مفعل",
+            )
+        }
+    }
+
+    fun saveBotSettings(phone: String, active: Boolean) = adminOnly {
+        val normalizedPhone = phone.filter { it.isDigit() }.ifBlank { "967" }
+        repository.saveBotConfig(normalizedPhone, active)
+        val logs = repository.fetchBotLogs()
+        _state.update {
+            it.copy(
+                botPhone = normalizedPhone,
+                botActive = active,
+                botLogs = logs,
+                botStatusMessage = if (active) {
+                    "تم حفظ الرقم $normalizedPhone، وسيطلب البوت كود ربط جديد لهذا الرقم."
+                } else {
+                    "تم حفظ الرقم $normalizedPhone مع إيقاف البوت مؤقتًا."
+                },
+            )
+        }
+        snackbar("تم حفظ إعدادات بوت واتساب في Supabase")
     }
 
     fun clearSnackbar() = _state.update { it.copy(message = null) }
@@ -192,6 +227,10 @@ data class BorgUiState(
     val tierCounts: List<TierCountTuple> = emptyList(),
     val dashboardScores: List<CompanyReportScore> = emptyList(),
     val message: String? = null,
+    val botPhone: String = "967",
+    val botActive: Boolean = false,
+    val botStatusMessage: String = "",
+    val botLogs: List<BotLog> = emptyList(),
 ) {
     val isUnlocked: Boolean get() = currentUser != null && mustChangePasscodeUser == null
     val isAdmin: Boolean get() = currentUser?.role == UserRole.ADMIN

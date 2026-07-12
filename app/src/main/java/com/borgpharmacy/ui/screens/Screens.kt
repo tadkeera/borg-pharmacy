@@ -153,6 +153,8 @@ fun BorgApp(
     onRestore: () -> Unit,
     onDriveBackup: () -> Unit,
     onSync: () -> Unit,
+    onSaveBotSettings: (String, Boolean) -> Unit,
+    onRefreshBotData: () -> Unit,
     onDismissMessage: () -> Unit,
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -215,7 +217,7 @@ fun BorgApp(
                     modifier = contentModifier,
                 )
                 Route.ENQUIRIES -> EnquiriesScreen(state, onWhatsApp, contentModifier)
-                Route.BOT -> WhatsAppBotScreen(state = state, modifier = contentModifier)
+                Route.BOT -> WhatsAppBotScreen(state = state, onSaveBotSettings = onSaveBotSettings, onRefreshBotData = onRefreshBotData, modifier = contentModifier)
                 Route.DASHBOARD -> DashboardScreen(state, contentModifier)
                 Route.SETTINGS -> SettingsScreen(
                     state = state,
@@ -894,11 +896,13 @@ data class BotLog(
 )
 
 @Composable
-private fun WhatsAppBotScreen(state: BorgUiState, modifier: Modifier) {
-    var botPhone by rememberSaveable { mutableStateOf("967") }
-    var botActive by rememberSaveable { mutableStateOf(false) }
-    var statusMessage by rememberSaveable { mutableStateOf("لم يتم إرسال كود ربط بعد") }
-    val logs = remember { mutableStateListOf<BotLog>() }
+private fun WhatsAppBotScreen(
+    state: BorgUiState,
+    onSaveBotSettings: (String, Boolean) -> Unit,
+    onRefreshBotData: () -> Unit,
+    modifier: Modifier,
+) {
+    LaunchedEffect(Unit) { onRefreshBotData() }
 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -910,19 +914,21 @@ private fun WhatsAppBotScreen(state: BorgUiState, modifier: Modifier) {
         }
         item {
             BotSettingsScreen(
-                currentPhone = botPhone,
-                isActive = botActive,
+                currentPhone = state.botPhone,
+                isActive = state.botActive,
                 canEdit = state.isAdmin,
-                statusMessage = statusMessage,
-                onSaveSettings = { phone, active ->
-                    val cleanPhone = phone.filter { it.isDigit() }.ifBlank { "967" }
-                    botPhone = cleanPhone
-                    botActive = active
-                    statusMessage = if (active) "تم حفظ الرقم $cleanPhone، وسيطلب البوت كود ربط جديد لهذا الرقم." else "تم حفظ الرقم $cleanPhone مع إيقاف البوت مؤقتًا."
-                },
+                statusMessage = state.botStatusMessage,
+                onSaveSettings = onSaveBotSettings,
             )
         }
-        item { BotLogsReportScreen(logs = logs) }
+        item { BotLogsReportScreen(logs = state.botLogs) }
+        item {
+            OutlinedButton(onClick = onRefreshBotData, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Sync, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("تحديث السجل")
+            }
+        }
     }
 }
 
