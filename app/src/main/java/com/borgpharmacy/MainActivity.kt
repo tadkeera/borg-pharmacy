@@ -270,36 +270,227 @@ class MainActivity : ComponentActivity() {
         fun esc(value: String): String = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
         val companies = state.companies.associateBy { it.id }
         val currentEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
+        
+        // دالة فرعية لإنشاء كتل الفترات الصباحية والمسائية بتنسيق مطابق لكروت الشركات بالتطبيق
         fun listHtml(date: java.time.LocalDate, shift: Shift): String {
             val visits = state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == date && it.shift == shift }.scheduleDisplaySorted()
             return buildString {
-                append("<div class='shift ${if (shift == Shift.MORNING) "morning" else "evening"}'><h4>${esc(shift.arabicName)} <span>${visits.size}</span></h4>")
-                visits.forEachIndexed { index, visit -> append("<div class='company'><b>${index + 1}</b><span>${esc(companies[visit.companyId]?.name ?: "شركة غير معروفة")}</span></div>") }
+                append("<div class='shift ${if (shift == Shift.MORNING) "morning" else "evening"}'>")
+                append("<h4 class='shift-title'>${esc(shift.arabicName)} <span class='badge'>${visits.size}</span></h4>")
+                visits.forEachIndexed { index, visit ->
+                    val companyName = companies[visit.companyId]?.name ?: "شركة غير معروفة"
+                    append("<div class='company-card'>")
+                    append("<span class='index'>${index + 1}</span>")
+                    append("<span class='name'>${esc(companyName)}</span>")
+                    append("</div>")
+                }
                 append("</div>")
             }
         }
+        
         file.writeText(buildString {
             append("""
-                <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><style>
-                @page{size:A4 landscape;margin:7mm}body{font-family:Arial,Tahoma,sans-serif;margin:0;background:#eef4fb;color:#082B52}.page{page-break-after:always;background:#fff;border-radius:18px;padding:10mm;min-height:190mm}.header{display:flex;justify-content:space-between;border-bottom:3px solid #0E4D8F;margin-bottom:8px}.days{display:grid;gap:8px}.three{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:repeat(2,1fr)}.day{border:2px solid #d7e6f3;border-radius:18px;padding:8px;background:#f9fcff}.day h3{text-align:center;margin:0 0 8px}.shift{border-radius:14px;padding:6px;margin-bottom:7px}.morning{background:#EAF4FF}.evening{background:#FFF0F4}.morning h4{color:#0E4D8F}.evening h4{color:#C8172B}.company{display:flex;gap:6px;background:white;border-radius:10px;margin:3px 0;padding:4px 6px;font-size:12px}.company b{background:#0E4D8F;color:white;border-radius:50%;min-width:22px;text-align:center}.evening .company b{background:#C8172B}
-                </style></head><body>
+                <!DOCTYPE html>
+                <html lang="ar" dir="rtl">
+                <head>
+                    <meta charset="UTF-8">
+                    <title>جداول زيارات صيدلية برج الأطباء</title>
+                    <style>
+                        /* استيراد الخط المعتمد بالتطبيق مباشرة لضمان انتظام المظهر البصري */
+                        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;800;900&display=swap');
+                        * { box-sizing: border-box; }
+                        
+                        body {
+                            font-family: 'Cairo', Tahoma, sans-serif;
+                            margin: 0;
+                            padding: 0;
+                            background-color: #cbd5e1;
+                            -webkit-print-color-adjust: exact;
+                        }
+                        
+                        /* تهيئة دقيقة لمعايير الطباعة والـ PDF من الهاتف لضمان مطابقة الـ A4 */
+                        @media print {
+                            body { background-color: #fff; }
+                            .page {
+                                page-break-after: always;
+                                box-shadow: none !important;
+                                border: none !important;
+                                margin: 0 !important;
+                                background-color: #fff !important;
+                            }
+                        }
+                        
+                        /* بطاقة الصفحة الأساسية ذات قياسات الـ A4 النموذجية */
+                        .page {
+                            width: 210mm;
+                            height: 297mm;
+                            padding: 12mm 15mm;
+                            background-color: #f8fafc;
+                            margin: 20px auto;
+                            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+                            border-radius: 16px;
+                            display: flex;
+                            flex-direction: column;
+                            border: 1px solid #e2e8f0;
+                        }
+                        
+                        /* الترويسة العلوية الأنيقة */
+                        .header {
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            border-bottom: 4px solid #0E4D8F;
+                            padding-bottom: 10px;
+                            margin-bottom: 15px;
+                        }
+                        .header h1 {
+                            font-size: 20px;
+                            font-weight: 900;
+                            color: #082B52;
+                            margin: 0;
+                        }
+                        .header h2 {
+                            font-size: 15px;
+                            font-weight: 700;
+                            color: #0E4D8F;
+                            margin: 0;
+                        }
+                        
+                        /* شبكة التوزيع الثلاثية (السبت، الأحد، الإثنين) */
+                        .grid-3 {
+                            display: grid;
+                            grid-template-columns: repeat(3, 1fr);
+                            gap: 12px;
+                            flex: 1;
+                        }
+                        
+                        /* شبكة التوزيع الثنائية (الثلاثاء، الأربعاء) */
+                        .grid-2 {
+                            display: grid;
+                            grid-template-columns: repeat(2, 1fr);
+                            gap: 20px;
+                            flex: 1;
+                        }
+                        
+                        /* أعمدة الأيام */
+                        .day-column {
+                            background-color: #ffffff;
+                            border: 1px solid #e2e8f0;
+                            border-radius: 16px;
+                            padding: 10px;
+                            display: flex;
+                            flex-direction: column;
+                            gap: 10px;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+                        }
+                        .day-title {
+                            text-align: center;
+                            font-size: 15px;
+                            font-weight: 900;
+                            color: #082B52;
+                            margin: 0;
+                            line-height: 1.2;
+                        }
+                        .day-subtitle {
+                            font-size: 11px;
+                            color: #64748b;
+                            font-weight: 700;
+                        }
+                        
+                        /* حاويات الفترات الملونة المريحة للعين */
+                        .shift {
+                            border-radius: 12px;
+                            padding: 8px;
+                            flex: 1;
+                            display: flex;
+                            flex-direction: column;
+                            gap: 6px;
+                        }
+                        .morning { background-color: #EAF4FF; }
+                        .evening { background-color: #FFF0F4; }
+                        
+                        .shift-title {
+                            font-size: 12px;
+                            font-weight: 850;
+                            margin: 0 0 4px 0;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                        }
+                        .morning .shift-title { color: #0E4D8F; }
+                        .evening .shift-title { color: #C8172B; }
+                        
+                        .badge {
+                            background-color: rgba(255,255,255,0.7);
+                            padding: 1px 6px;
+                            border-radius: 50px;
+                            font-size: 10px;
+                            font-weight: 800;
+                        }
+                        
+                        /* بطاقة الشركة المستوحاة من كروت الشركات بالتطبيق وبشريط جانبي ملون مميز (RTL) */
+                        .company-card {
+                            background-color: #ffffff;
+                            border-radius: 8px;
+                            padding: 8px 10px;
+                            font-size: 12px;
+                            font-weight: 800; /* خط عريض وبارز */
+                            color: #082B52;
+                            display: flex;
+                            align-items: center;
+                            gap: 6px;
+                            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                            border-right: 4px solid #cbd5e1;
+                        }
+                        .morning .company-card { border-right-color: #0E4D8F; }
+                        .evening .company-card { border-right-color: #C8172B; }
+                        
+                        .index {
+                            font-weight: 900;
+                            color: #64748b;
+                            width: 14px;
+                            text-align: center;
+                        }
+                        
+                        /* خاصية التفاف النص التلقائي لأسفل لكي يظهر اسم الشركة كاملاً في حال كان طويلاً */
+                        .name {
+                            word-break: break-word;
+                            line-height: 1.35;
+                        }
+                    </style>
+                </head>
+                <body>
             """.trimIndent())
+            
+            // التكرار لكل أسابيع الدورة الأربعة لإنشاء صفحات منفصلة
             (1..4).forEach { week ->
                 val weekStart = state.cycleInfo.currentCycleStart.plusDays(((week - 1) * 7).toLong())
-                listOf(0..2, 3..4).forEachIndexed { pageIndex, range ->
-                    append("<section class='page'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - ${if (pageIndex == 0) "السبت إلى الإثنين" else "الثلاثاء والأربعاء"}</h2></div><div class='days ${if (pageIndex == 0) "three" else "two"}'>")
-                    range.forEach { dayOffset ->
-                        val date = weekStart.plusDays(dayOffset.toLong())
-                        append("<div class='day'><h3>${esc(date.dayOfWeek.borgArabicName())}<br><small>${date}</small></h3>")
-                        append(listHtml(date, Shift.MORNING)).append(listHtml(date, Shift.EVENING)).append("</div>")
-                    }
-                    append("</div></section>")
+                
+                // الصفحة الأولى: السبت، الأحد، الإثنين
+                append("<section class='page'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - السبت إلى الإثنين</h2></div><div class='grid-3'>")
+                (0..2).forEach { dayOffset ->
+                    val date = weekStart.plusDays(dayOffset.toLong())
+                    append("<div class='day-column'><h3 class='day-title'>${esc(date.dayOfWeek.borgArabicName())}<br><span class='day-subtitle'>${date}</span></h3>")
+                    append(listHtml(date, Shift.MORNING))
+                    append(listHtml(date, Shift.EVENING))
+                    append("</div>")
                 }
+                append("</div></section>")
+                
+                // الصفحة الثانية: الثلاثاء، الأربعاء
+                append("<section class='page'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - الثلاثاء والأربعاء</h2></div><div class='grid-2'>")
+                (3..4).forEach { dayOffset ->
+                    val date = weekStart.plusDays(dayOffset.toLong())
+                    append("<div class='day-column'><h3 class='day-title'>${esc(date.dayOfWeek.borgArabicName())}<br><span class='day-subtitle'>${date}</span></h3>")
+                    append(listHtml(date, Shift.MORNING))
+                    append(listHtml(date, Shift.EVENING))
+                    append("</div>")
+                }
+                append("</div></section>")
             }
             append("</body></html>")
         }, Charsets.UTF_8)
     }
-
     private fun writeSchedulesPdf(file: File, state: BorgUiState) {
         val companies = state.companies.associateBy { it.id }
         val currentEpoch = state.cycleInfo.currentCycleStart.toEpochDay()

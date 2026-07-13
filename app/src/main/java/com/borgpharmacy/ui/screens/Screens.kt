@@ -123,9 +123,100 @@ private enum class Route(val label: String, val icon: ImageVector) {
     WEEKLY("الأسابيع", Icons.Default.CalendarMonth),
     COMPANIES("الشركات", Icons.Default.Business),
     ENQUIRIES("التواصل", Icons.Default.Send),
-    BOT("بوت واتساب", Icons.Default.Sync),
+    BOT("البوت", Icons.Default.Sync),
     DASHBOARD("التقارير", Icons.Default.Assessment),
     SETTINGS("الإعدادات", Icons.Default.Settings),
+}
+
+
+@Composable
+private fun BorgColoredIcon(route: Route, isSelected: Boolean) {
+    val size = 26.dp
+    Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
+        when (route) {
+            Route.HOME -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.White)
+                        .border(BorderStroke(1.2.dp, Color(0xFFD1D5DB)), RoundedCornerShape(6.dp)),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().height(7.dp).background(Color(0xFFE11D48)))
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text("17", color = DeepNavy, fontSize = 10.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+            Route.WEEKLY -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.White)
+                        .border(BorderStroke(1.2.dp, Color(0xFF2563EB)), RoundedCornerShape(6.dp)),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().height(7.dp).background(Color(0xFF2563EB)))
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text("4\nWk", color = DeepNavy, fontSize = 7.sp, lineHeight = 7.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+            Route.COMPANIES -> {
+                Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp, 24.dp)
+                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                            .background(Color(0xFF94A3B8))
+                            .border(BorderStroke(1.dp, Color(0xFF64748B)), RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                    ) {
+                        Column(modifier = Modifier.fillMaxSize().padding(2.dp), verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally) {
+                            Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+                                Box(modifier = Modifier.size(3.dp).background(Color.White)); Box(modifier = Modifier.size(3.dp).background(Color.White))
+                            }
+                            Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+                                Box(modifier = Modifier.size(3.dp).background(Color.White)); Box(modifier = Modifier.size(3.dp).background(Color.White))
+                            }
+                            Box(modifier = Modifier.size(4.dp, 6.dp).background(Color(0xFF3B82F6)))
+                        }
+                    }
+                }
+            }
+            Route.ENQUIRIES -> {
+                Box(modifier = Modifier.size(24.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF128C7E)), contentAlignment = Alignment.Center) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(Color.White)); Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(Color.White)); Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(Color.White))
+                    }
+                }
+            }
+            Route.BOT -> {
+                Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Box(modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFF64748B)), contentAlignment = Alignment.Center) {
+                        Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+                            Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(Color.Yellow)); Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(Color.Yellow))
+                        }
+                    }
+                    Spacer(Modifier.height(1.dp))
+                    Box(modifier = Modifier.size(8.dp, 2.dp).background(Color.Red))
+                }
+            }
+            Route.DASHBOARD -> {
+                Row(modifier = Modifier.size(22.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
+                    Box(modifier = Modifier.size(4.dp, 10.dp).background(Color(0xFF22C55E)))
+                    Box(modifier = Modifier.size(4.dp, 18.dp).background(Color(0xFFEF4444)))
+                    Box(modifier = Modifier.size(4.dp, 14.dp).background(Color(0xFF3B82F6)))
+                }
+            }
+            Route.SETTINGS -> {
+                Box(modifier = Modifier.size(22.dp).clip(CircleShape).background(Color(0xFF0E4D8F)), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color.White))
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -188,7 +279,7 @@ fun BorgApp(
                         NavigationBarItem(
                             selected = selected == item,
                             onClick = { route = item.name },
-                            icon = { Icon(item.icon, contentDescription = item.label) },
+                            icon = { BorgColoredIcon(item, selected == item) },
                             label = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = BorgBlue,
