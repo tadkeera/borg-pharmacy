@@ -183,7 +183,7 @@ fun BorgApp(
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = { BorgTopBar(state = state, onLogout = onLogout) },
             bottomBar = {
-                NavigationBar(containerColor = Color.White, toneElevation = 8.dp) {
+                NavigationBar(containerColor = Color.White, tonalElevation = 8.dp) {
                     Route.entries.forEach { item ->
                         NavigationBarItem(
                             selected = selected == item,
@@ -682,7 +682,7 @@ private fun WeeklyScreen(state: BorgUiState, onExportSchedules: (String) -> Unit
                 .weight(1f)
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, bottom = 24.dp)
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)
         ) {
             val weekStart = state.cycleInfo.currentCycleStart.plusDays(((selectedWeek - 1) * 7).toLong())
             val days = (0..6).map { weekStart.plusDays(it.toLong()) }.filter { it.dayOfWeek.isBorgWorkingDay() }
