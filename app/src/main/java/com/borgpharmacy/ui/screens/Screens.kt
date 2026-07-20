@@ -206,6 +206,13 @@ private fun BorgColoredIcon(route: Route, isSelected: Boolean) {
                     Box(modifier = Modifier.size(8.dp, 2.dp).background(Color.Red))
                 }
             }
+            Route.MORE -> {
+                Row(modifier = Modifier.size(24.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(Color(0xFF0E4D8F)))
+                    Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(Color(0xFF64748B)))
+                    Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(Color(0xFFC8172B)))
+                }
+            }
             Route.DASHBOARD -> {
                 Row(modifier = Modifier.size(22.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
                     Box(modifier = Modifier.size(4.dp, 10.dp).background(Color(0xFF22C55E)))
@@ -340,6 +347,7 @@ fun BorgApp(
                     onCreateUser = onCreateUser,
                     modifier = contentModifier,
                 )
+                Route.MORE -> Unit
             }
         }
     }
