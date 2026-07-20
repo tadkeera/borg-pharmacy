@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="صفحة استعلام مندوبي الأدوية عن جداول زياراتهم في صيدلية برج الأطباء" />
+  <title>صيدلية برج الأطباء - إدارة الصيدلية</title>
+
+  <!-- Tailwind CSS عبر CDN لتنسيق سريع وأنيق. توجد أنماط CSS داخلية أيضاً لضمان مظهر جيد عند تعذر تحميل CDN. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Supabase JS v2 عبر CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --primary: #1d4ed8;
+      --primary-dark: #1e3a8a;
+      --secondary: #0f766e;
+      --surface: rgba(255, 255, 255, 0.92);
+      --border: rgba(148, 163, 184, 0.35);
+      --text: #0f172a;
+      --muted: #64748b;
+      --danger: #b91c1c;
+      --success: #047857;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.20), transparent 34rem),
+        radial-gradient(circle at bottom left, rgba(20, 184, 166, 0.16), transparent 30rem),
+        linear-gradient(135deg, #eff6ff 0%, #f8fafc 52%, #ecfeff 100%);
+    }
+
+    .page-shell {
+      width: min(100%, 980px);
+      margin-inline: auto;
+      padding: 22px 14px 34px;
+    }
+
+    .glass-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+      backdrop-filter: blur(14px);
+      border-radius: 28px;
+    }
+
+    .logo-placeholder {
+      width: 92px;
+      height: 92px;
+      border-radius: 28px;
+      display: grid;
+      place-items: center;
+      margin-inline: auto;
+      color: white;
+      background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+      box-shadow: 0 18px 34px rgba(29, 78, 216, 0.26);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .logo-placeholder::after {
+      content: "";
+      position: absolute;
+      inset: -45% auto auto -25%;
+      width: 96px;
+      height: 96px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.22);
+    }
+
+    .input-wrap { position: relative; }
+
+    .search-input {
+      width: 100%;
+      min-height: 56px;
+      border: 1px solid #cbd5e1;
+      border-radius: 18px;
+      padding: 0 50px 0 16px;
+      background: #fff;
+      outline: none;
+      font-size: 1rem;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .search-input:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+    }
+
+    .input-icon {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #64748b;
+      pointer-events: none;
+    }
+
+    .suggestions {
+      position: absolute;
+      z-index: 40;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid #dbe3ef;
+      border-radius: 18px;
+      box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
+      overflow: hidden;
+      max-height: 292px;
+      overflow-y: auto;
+    }
+
+    .suggestion-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 15px;
+      border: 0;
+      background: transparent;
+      color: #0f172a;
+      text-align: right;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .suggestion-item:hover,
+    .suggestion-item:focus {
+      background: #eff6ff;
+      outline: none;
+    }
+
+    .message {
+      border-radius: 18px;
+      padding: 13px 15px;
+      font-weight: 700;
+      line-height: 1.75;
+    }
+
+    .message.info { color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; }
+    .message.warn { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; }
+    .message.error { color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; }
+    .message.success { color: #065f46; background: #ecfdf5; border: 1px solid #a7f3d0; }
+
+    .result-card {
+      background: #fff;
+      border: 1px solid #dbeafe;
+      border-radius: 24px;
+      padding: 20px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    }
+
+    .result-title {
+      font-size: clamp(1.25rem, 4.5vw, 2rem);
+      color: var(--primary-dark);
+      font-weight: 900;
+      line-height: 1.35;
+      margin: 0 0 14px;
+    }
+
+    .schedule-list {
+      list-style: none;
+      padding: 0;
+      margin: 16px 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .schedule-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 13px 14px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #eff6ff 0%, #f0fdfa 100%);
+      border: 1px solid #dbeafe;
+      line-height: 1.8;
+    }
+
+    .bullet-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--secondary);
+      margin-top: 11px;
+      flex: 0 0 auto;
+    }
+
+    .loading-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-inline: 2px;
+      border-radius: 999px;
+      background: currentColor;
+      animation: pulse 1s infinite ease-in-out;
+    }
+    .loading-dot:nth-child(2) { animation-delay: 160ms; }
+    .loading-dot:nth-child(3) { animation-delay: 320ms; }
+
+    @keyframes pulse {
+      0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+      40% { opacity: 1; transform: translateY(-3px); }
+    }
+
+    @media (max-width: 640px) {
+      .page-shell { padding-top: 12px; }
+      .glass-card { border-radius: 22px; }
+      .logo-placeholder { width: 78px; height: 78px; border-radius: 23px; }
+      .result-card { padding: 16px; border-radius: 20px; }
+      .schedule-list li { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page-shell">
+    <section class="glass-card p-5 sm:p-8 md:p-10">
+      <header class="text-center mb-7">
+        <!-- مساحة مخصصة للشعار: يمكن لاحقاً استبدال محتواها بصورة <img> للشعار الرسمي -->
+        <div class="logo-placeholder" aria-label="مساحة شعار صيدلية برج الأطباء">
+          <svg width="52" height="52" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+            <path d="M31.7 7.5c-9.9 0-18 8.1-18 18 0 14.7 18 31 18 31s18-16.3 18-31c0-9.9-8.1-18-18-18Z" fill="rgba(255,255,255,.20)" stroke="white" stroke-width="3"/>
+            <path d="M32 18v15M24.5 25.5h15" stroke="white" stroke-width="5" stroke-linecap="round"/>
+            <path d="M22 40.5h20" stroke="white" stroke-width="4" stroke-linecap="round" opacity=".92"/>
+          </svg>
+        </div>
+        <p class="mt-3 text-sm font-bold text-slate-500">ضع الشعار هنا</p>
+        <h1 class="mt-3 text-2xl sm:text-3xl md:text-4xl font-black text-blue-900 leading-snug">
+          صيدلية برج الأطباء - إدارة الصيدلية
+        </h1>
+        <p class="mt-2 text-slate-600 font-semibold leading-8">
+          صفحة مخصصة لمندوبي الأدوية للاستعلام السريع عن جدول الزيارات.
+        </p>
+      </header>
+
+      <form id="searchForm" class="grid gap-4" autocomplete="off">
+        <label for="companySearch" class="font-extrabold text-slate-800">اسم الشركة</label>
+
+        <div class="input-wrap">
+          <span class="input-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="m21 21-4.35-4.35M10.8 18.2a7.4 7.4 0 1 1 0-14.8 7.4 7.4 0 0 1 0 14.8Z" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <input
+            id="companySearch"
+            class="search-input"
+            type="text"
+            inputmode="search"
+            placeholder="اكتب 3 أحرف أو أكثر من اسم الشركة..."
+            aria-label="البحث عن اسم الشركة"
+            aria-autocomplete="list"
+            aria-controls="suggestionsList"
+            aria-expanded="false"
+          />
+
+          <!-- قائمة الإكمال التلقائي -->
+          <div id="suggestionsList" class="suggestions hidden" role="listbox"></div>
+        </div>
+
+        <button
+          id="searchButton"
+          type="submit"
+          class="min-h-14 rounded-2xl bg-blue-700 px-6 py-3 text-white font-black text-lg shadow-lg shadow-blue-700/20 transition hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          بحث
+        </button>
+      </form>
+
+      <!-- رسائل الحالة -->
+      <div id="statusBox" class="mt-5 hidden" aria-live="polite"></div>
+
+      <!-- قسم عرض نتيجة البحث / جدول الزيارات -->
+      <section id="results" class="mt-6" aria-live="polite"></section>
+    </section>
+  </main>
+
+  <script>
+    /**********************************************************************
+     * إعداد Supabase
+     * ملاحظة مهمة: مفتاح anon آمن للنشر فقط عند تفعيل RLS ومنع الكتابة.
+     **********************************************************************/
+    const SUPABASE_URL = "https://dtkldxmfkhipdgiltzjl.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0a2xkeG1ma2hpcGRnaWx0empsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNzY3NjIsImV4cCI6MjA5ODg1Mjc2Mn0.jXEUggNeO_tvt2lm7BRRbzm4p1eI-WZRvojLVdKn2fg";
+
+    const companyInput = document.getElementById("companySearch");
+    const suggestionsList = document.getElementById("suggestionsList");
+    const searchForm = document.getElementById("searchForm");
+    const searchButton = document.getElementById("searchButton");
+    const statusBox = document.getElementById("statusBox");
+    const results = document.getElementById("results");
+
+    let db = null;
+    let selectedCompany = null;
+    let latestAutocompleteRequest = 0;
+    let autocompleteTimer = null;
+    let companyNameColumn = "name"; // في قاعدة التطبيق الحالية اسم العمود هو name. إذا كان لديك company_name سيتم اكتشافه تلقائياً.
+
+    /** حماية النصوص القادمة من قاعدة البيانات قبل طباعتها داخل HTML. */
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    /** تهذيب بسيط للنص العربي للمقارنة فقط. */
+    function normalizeArabic(value) {
+      return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/[\u064B-\u065F\u0670]/g, "")
+        .replace(/[إأآٱ]/g, "ا")
+        .replace(/ى/g, "ي")
+        .replace(/ة/g, "ه")
+        .replace(/ؤ/g, "و")
+        .replace(/ئ/g, "ي")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .replace(/\s+/g, " ");
+    }
+
+    /** منع أحرف wildcard غير المرغوبة داخل ilike قدر الإمكان. */
+    function cleanSearchTerm(value) {
+      return String(value ?? "").trim().replace(/[\\%_]/g, " ").replace(/\s+/g, " ");
+    }
+
+    function showStatus(type, html) {
+      statusBox.className = `mt-5 message ${type}`;
+      statusBox.innerHTML = html;
+      statusBox.classList.remove("hidden");
+    }
+
+    function hideStatus() {
+      statusBox.classList.add("hidden");
+      statusBox.innerHTML = "";
+    }
+
+    function setLoading(isLoading) {
+      searchButton.disabled = isLoading;
+      searchButton.innerHTML = isLoading
+        ? 'جاري البحث <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>'
+        : "بحث";
+    }
+
+    function openSuggestions() {
+      suggestionsList.classList.remove("hidden");
+      companyInput.setAttribute("aria-expanded", "true");
+    }
+
+    function closeSuggestions() {
+      suggestionsList.classList.add("hidden");
+      suggestionsList.innerHTML = "";
+      companyInput.setAttribute("aria-expanded", "false");
+    }
+
+    function renderSuggestionMessage(message) {
+      suggestionsList.innerHTML = `<div class="px-4 py-3 text-sm font-bold text-slate-500">${escapeHtml(message)}</div>`;
+      openSuggestions();
+    }
+
+    function getCompanyDisplayName(row) {
+      return row?.name ?? row?.company_name ?? row?.[companyNameColumn] ?? "";
+    }
+
+    async function queryCompaniesByColumn(column, term) {
+      return db
+        .from("companies")
+        .select(`id, ${column}`)
+        .ilike(column, `%${term}%`)
+        .limit(8);
+    }
+
+    /**
+     * الإكمال التلقائي:
+     * يبحث في جدول companies عند إدخال 3 أحرف أو أكثر.
+     * يدعم عمود name المستخدم في التطبيق الحالي، ويجرب company_name تلقائياً إذا كان هو الموجود بقاعدتك.
+     */
+    async function fetchCompanySuggestions(term) {
+      let response = await queryCompaniesByColumn("name", term);
+
+      if (response.error) {
+        const fallback = await queryCompaniesByColumn("company_name", term);
+        if (!fallback.error) {
+          companyNameColumn = "company_name";
+          response = fallback;
+        }
+      } else {
+        companyNameColumn = "name";
+      }
+
+      if (response.error) throw response.error;
+
+      return (response.data || [])
+        .map(row => ({ id: row.id, name: getCompanyDisplayName(row) }))
+        .filter(company => company.id && company.name);
+    }
+
+    function renderSuggestions(companies) {
+      if (!companies.length) {
+        renderSuggestionMessage("لا توجد شركات مطابقة.");
+        return;
+      }
+
+      suggestionsList.innerHTML = companies.map((company, index) => `
+        <button class="suggestion-item" type="button" role="option" data-index="${index}">
+          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M4 20V7.5A2.5 2.5 0 0 1 6.5 5h7A2.5 2.5 0 0 1 16 7.5V20M3 20h18M8 9h4M8 13h4M8 17h4M16 11h1.5A2.5 2.5 0 0 1 20 13.5V20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="font-extrabold">${escapeHtml(company.name)}</span>
+        </button>
+      `).join("");
+
+      [...suggestionsList.querySelectorAll(".suggestion-item")].forEach((button) => {
+        button.addEventListener("click", () => {
+          selectedCompany = companies[Number(button.dataset.index)];
+          companyInput.value = selectedCompany.name;
+          closeSuggestions();
+          hideStatus();
+          results.innerHTML = "";
+        });
+      });
+
+      openSuggestions();
+    }
+
+    function setupAutocomplete() {
+      companyInput.addEventListener("input", () => {
+        selectedCompany = null;
+        results.innerHTML = "";
+        hideStatus();
+        clearTimeout(autocompleteTimer);
+
+        const term = cleanSearchTerm(companyInput.value);
+        if (term.length < 3) {
+          closeSuggestions();
+          return;
+        }
+
+        autocompleteTimer = setTimeout(async () => {
+          const requestId = ++latestAutocompleteRequest;
+          renderSuggestionMessage("جاري البحث عن الشركات...");
+
+          try {
+            const companies = await fetchCompanySuggestions(term);
+            if (requestId !== latestAutocompleteRequest) return;
+            renderSuggestions(companies);
+          } catch (error) {
+            console.error("Autocomplete error:", error);
+            if (requestId !== latestAutocompleteRequest) return;
+            renderSuggestionMessage("تعذر جلب نتائج الإكمال التلقائي.");
+          }
+        }, 320);
+      });
+
+      document.addEventListener("click", (event) => {
+        if (!event.target.closest(".input-wrap")) closeSuggestions();
+      });
+    }
+
+    function formatEpochDay(epochDay) {
+      const numericEpoch = Number(epochDay);
+      if (!Number.isFinite(numericEpoch)) return "غير محدد";
+      const date = new Date(numericEpoch * 86400000);
+      return date.toISOString().slice(0, 10);
+    }
+
+    function dayNameFromEpochDay(epochDay) {
+      const numericEpoch = Number(epochDay);
+      if (!Number.isFinite(numericEpoch)) return "غير محدد";
+      const date = new Date(numericEpoch * 86400000);
+      try {
+        return new Intl.DateTimeFormat("ar", { weekday: "long", timeZone: "UTC" }).format(date);
+      } catch (_) {
+        const days = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+        return days[date.getUTCDay()] || "غير محدد";
+      }
+    }
+
+    function shiftLabel(value) {
+      const shift = String(value ?? "").toUpperCase();
+      if (shift === "MORNING") return "الفترة الصباحية";
+      if (shift === "EVENING") return "الفترة المسائية";
+      return value || "غير محدد";
+    }
+
+    /**
+     * محاولة جلب المواعيد من جدول/عرض schedules بالتنسيق المطلوب في المهمة.
+     * إذا لم يكن schedules موجوداً، يتم الرجوع تلقائياً إلى جدول visits المستخدم في تطبيق Borg Pharmacy الحالي.
+     */
+    async function fetchSchedules(company) {
+      const schedulesResponse = await db
+        .from("schedules")
+        .select("week_number, day_name, date, shift_time, company_id, company_name")
+        .eq("company_id", company.id)
+        .order("week_number", { ascending: true });
+
+      if (!schedulesResponse.error) {
+        return (schedulesResponse.data || []).map(row => ({
+          weekNumber: row.week_number,
+          dayName: row.day_name,
+          date: row.date,
+          shiftTime: row.shift_time
+        }));
+      }
+
+      console.warn("schedules table/view unavailable; falling back to visits table:", schedulesResponse.error.message);
+
+      let visitsResponse = await db
+        .from("visits")
+        .select("week_of_cycle, day_of_cycle, date_epoch_day, shift, slot_index, deleted_at")
+        .eq("company_id", company.id)
+        .is("deleted_at", null)
+        .order("week_of_cycle", { ascending: true })
+        .order("day_of_cycle", { ascending: true })
+        .order("slot_index", { ascending: true });
+
+      // إذا كان جدول visits في نسخة مبسطة لا يحتوي deleted_at، نجرب مرة أخرى بدونه.
+      if (visitsResponse.error) {
+        visitsResponse = await db
+          .from("visits")
+          .select("week_of_cycle, day_of_cycle, date_epoch_day, shift, slot_index")
+          .eq("company_id", company.id)
+          .order("week_of_cycle", { ascending: true })
+          .order("day_of_cycle", { ascending: true })
+          .order("slot_index", { ascending: true });
+      }
+
+      if (visitsResponse.error) throw visitsResponse.error;
+
+      return (visitsResponse.data || []).map(row => ({
+        weekNumber: row.week_of_cycle,
+        dayName: dayNameFromEpochDay(row.date_epoch_day),
+        date: formatEpochDay(row.date_epoch_day),
+        shiftTime: shiftLabel(row.shift)
+      }));
+    }
+
+    async function resolveCompanyFromInput(term) {
+      if (selectedCompany && normalizeArabic(selectedCompany.name) === normalizeArabic(term)) {
+        return selectedCompany;
+      }
+
+      const companies = await fetchCompanySuggestions(term);
+      if (!companies.length) return null;
+
+      return companies.find(company => normalizeArabic(company.name) === normalizeArabic(term)) || companies[0];
+    }
+
+    function renderResults(company, schedules) {
+      if (!schedules.length) {
+        results.innerHTML = "";
+        showStatus("warn", "لا توجد مواعيد لهذه الشركة.");
+        return;
+      }
+
+      hideStatus();
+
+      const rowsHtml = schedules.map(row => `
+        <li>
+          <span class="bullet-dot" aria-hidden="true"></span>
+          <span>
+            <strong>الأسبوع ${escapeHtml(row.weekNumber)}:</strong>
+            (${escapeHtml(row.dayName)}) - (${escapeHtml(row.date)}) - ${escapeHtml(row.shiftTime)}
+          </span>
+        </li>
+      `).join("");
+
+      // تنسيق النتيجة مطابق للنص المطلوب في المهمة.
+      results.innerHTML = `
+        <article class="result-card">
+          <h2 class="result-title">صيدلية برج الأطباء - إدارة الصيدلية</h2>
+          <p class="text-lg leading-9"><strong>شركة:</strong> ${escapeHtml(company.name)}</p>
+          <h3 class="mt-5 text-xl font-black text-slate-900">جدول الزيارات</h3>
+          <ul class="schedule-list">${rowsHtml}</ul>
+          <p class="mt-4 rounded-2xl bg-emerald-50 p-4 font-extrabold text-emerald-800 border border-emerald-100">
+            يرجى الالتزام بالموعد المحدد.
+          </p>
+        </article>
+      `;
+    }
+
+    async function handleSearch(event) {
+      event.preventDefault();
+      closeSuggestions();
+      results.innerHTML = "";
+
+      const term = cleanSearchTerm(companyInput.value);
+      if (term.length < 3) {
+        showStatus("warn", "يرجى كتابة 3 أحرف أو أكثر من اسم الشركة.");
+        return;
+      }
+
+      try {
+        setLoading(true);
+        showStatus("info", 'جاري البحث عن جدول الزيارات <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>');
+
+        const company = await resolveCompanyFromInput(term);
+        if (!company) {
+          results.innerHTML = "";
+          showStatus("warn", "لم يتم العثور على شركة بهذا الاسم. جرّب اختيار الشركة من القائمة المنسدلة.");
+          return;
+        }
+
+        selectedCompany = company;
+        companyInput.value = company.name;
+
+        const schedules = await fetchSchedules(company);
+        renderResults(company, schedules);
+      } catch (error) {
+        console.error("Search error:", error);
+        results.innerHTML = "";
+        showStatus("error", "حدث خطأ أثناء البحث. تأكد من الاتصال بالإنترنت ومن تفعيل صلاحيات القراءة في Supabase.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function init() {
+      if (!window.supabase?.createClient) {
+        showStatus("error", "تعذر تحميل مكتبة Supabase. يرجى التأكد من اتصال الإنترنت ثم إعادة تحميل الصفحة.");
+        searchButton.disabled = true;
+        return;
+      }
+
+      db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+
+      setupAutocomplete();
+      searchForm.addEventListener("submit", handleSearch);
+    }
+
+    init();
+  </script>
+</body>
+</html>
