@@ -288,7 +288,7 @@ class MainActivity : ComponentActivity() {
 
         if (companies.isEmpty()) {
             round(92f, listTop + 120f, width - 92f, listTop + 250f, Color.WHITE, 28f, accent, 4f)
-            canvas.drawText("لا توجد شركات مجدولة في هذه الفترة", width / 2f, listTop + 200f, Paint(cardTextPaint).apply { textAlign = Paint.Align.CENTER; textSize = 34f })
+            canvas.drawText("لا توجد شركات مجدولة في هذه الفترة", width / 2f, listTop + 200f, Paint(cardTextPaint).apply { textAlign = Paint.Align.CENTER; this.textSize = 34f })
         } else {
             var y = listTop
             companies.forEachIndexed { index, name ->
