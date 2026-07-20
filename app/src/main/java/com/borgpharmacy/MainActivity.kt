@@ -172,59 +172,166 @@ class MainActivity : ComponentActivity() {
     ) {
         val width = 1080
         val height = 1920
-        val root = layoutInflater.inflate(R.layout.share_story_schedule, null)
-        root.layoutParams = ViewGroup.LayoutParams(width, height)
-        val header = root.findViewById<LinearLayout>(R.id.story_header)
-        header.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(36, 91, 199), Color.rgb(47, 145, 241))).apply { cornerRadius = 46f }
-        root.findViewById<TextView>(R.id.story_date).text = dateText
-        root.findViewById<TextView>(R.id.story_week).text = weekText
-        root.findViewById<TextView>(R.id.story_shift_title).text = shiftTitle
-        root.findViewById<TextView>(R.id.story_shift_icon).text = shiftIcon
-        val list = root.findViewById<LinearLayout>(R.id.story_company_list)
-        list.removeAllViews()
-        companies.forEachIndexed { index, name ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                layoutDirection = View.LAYOUT_DIRECTION_RTL
-                background = GradientDrawable().apply {
-                    setColor(Color.WHITE)
-                    cornerRadius = 28f
-                    setStroke(4, accent)
-                }
-                setPadding(26, 18, 26, 18)
-            }
-            row.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 18) }
-            val number = TextView(this).apply {
-                text = (index + 1).toString()
-                setTextColor(accent)
-                textSize = 22f
-                typeface = Typeface.create(ResourcesCompat.getFont(this@MainActivity, R.font.cairo_bold), Typeface.BOLD)
-                gravity = android.view.Gravity.CENTER
-            }
-            number.layoutParams = LinearLayout.LayoutParams(70, 70)
-            val title = TextView(this).apply {
-                text = name
-                setTextColor(Color.rgb(7, 31, 58))
-                textSize = if (companies.size > 22) 22f else 28f
-                typeface = Typeface.create(ResourcesCompat.getFont(this@MainActivity, R.font.cairo_bold), Typeface.BOLD)
-                gravity = android.view.Gravity.RIGHT
-                setLineSpacing(0f, 1.05f)
-            }
-            title.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            row.addView(number)
-            row.addView(title)
-            list.addView(row)
-        }
-        val shiftHeader = root.findViewById<LinearLayout>(R.id.story_shift_header)
-        shiftHeader.background = GradientDrawable().apply { setColor(soft); cornerRadius = 34f; setStroke(3, accent) }
-        root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
-        root.layout(0, 0, width, height)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        root.draw(canvas)
+        val cairo = ResourcesCompat.getFont(this, R.font.cairo_bold) ?: Typeface.DEFAULT_BOLD
+
+        fun round(l: Float, t: Float, r: Float, b: Float, color: Int, radius: Float = 34f, strokeColor: Int? = null, strokeWidth: Float = 4f) {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
+            canvas.drawRoundRect(l, t, r, b, radius, radius, p)
+            if (strokeColor != null) {
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = strokeWidth
+                p.color = strokeColor
+                canvas.drawRoundRect(l, t, r, b, radius, radius, p)
+            }
+        }
+
+        fun ellipsize(text: String, paint: Paint, maxWidth: Float): String {
+            if (paint.measureText(text) <= maxWidth) return text
+            var end = text.length
+            while (end > 1 && paint.measureText(text.substring(0, end) + "…") > maxWidth) end--
+            return text.substring(0, end).trim() + "…"
+        }
+
+        fun splitTwoLines(text: String, paint: Paint, maxWidth: Float): List<String> {
+            if (paint.measureText(text) <= maxWidth) return listOf(text)
+            val words = text.split(" ").filter { it.isNotBlank() }
+            if (words.size <= 1) return listOf(ellipsize(text, paint, maxWidth))
+            var first = ""
+            var index = 0
+            while (index < words.size) {
+                val candidate = if (first.isBlank()) words[index] else "$first ${words[index]}"
+                if (paint.measureText(candidate) > maxWidth) break
+                first = candidate
+                index++
+            }
+            if (first.isBlank()) return listOf(ellipsize(text, paint, maxWidth))
+            val secondRaw = words.drop(index).joinToString(" ")
+            return if (secondRaw.isBlank()) listOf(first) else listOf(first, ellipsize(secondRaw, paint, maxWidth))
+        }
+
+        canvas.drawColor(Color.rgb(244, 248, 252))
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(234, 239, 246); style = Paint.Style.FILL }
+        canvas.drawRoundRect(24f, 24f, width - 24f, height - 24f, 48f, 48f, bgPaint)
+
+        val header = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(36, 91, 199), Color.rgb(47, 145, 241))).apply { cornerRadius = 44f }
+        header.setBounds(72, 90, width - 72, 390)
+        header.draw(canvas)
+
+        val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            typeface = cairo
+            textAlign = Paint.Align.CENTER
+            textSize = 54f
+        }
+        val weekPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(230, 242, 255)
+            typeface = cairo
+            textAlign = Paint.Align.CENTER
+            textSize = 34f
+        }
+        canvas.drawText(dateText, width / 2f, 205f, datePaint)
+        canvas.drawText(weekText, width / 2f, 290f, weekPaint)
+
+        val shiftTop = 460f
+        val shiftBottom = 620f
+        round(72f, shiftTop, width - 72f, shiftBottom, soft, 34f, accent, 4f)
+        val shiftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(7, 31, 58)
+            typeface = cairo
+            textAlign = Paint.Align.RIGHT
+            textSize = 54f
+        }
+        val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = accent
+            typeface = cairo
+            textAlign = Paint.Align.LEFT
+            textSize = 62f
+        }
+        canvas.drawText(shiftTitle, width - 190f, 555f, shiftPaint)
+        canvas.drawText(shiftIcon, 145f, 555f, iconPaint)
+
+        val count = companies.size
+        val listTop = 660f
+        val footerTop = 1780f
+        val available = footerTop - listTop
+        val gap = when {
+            count <= 12 -> 18f
+            count <= 18 -> 12f
+            count <= 30 -> 7f
+            count <= 60 -> 3f
+            else -> 1.5f
+        }
+        val rowHeight = if (count == 0) 110f else ((available - gap * (count - 1)) / count).coerceIn(7f, 92f)
+        val textSize = when {
+            rowHeight >= 76f -> 38f
+            rowHeight >= 58f -> 31f
+            rowHeight >= 44f -> 24f
+            rowHeight >= 28f -> 18f
+            rowHeight >= 18f -> 12f
+            else -> 7f
+        }
+        val cardTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(7, 31, 58)
+            typeface = cairo
+            textAlign = Paint.Align.RIGHT
+            this.textSize = textSize
+        }
+        val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = accent
+            typeface = cairo
+            textAlign = Paint.Align.CENTER
+            this.textSize = (textSize * 0.72f).coerceAtLeast(14f)
+        }
+
+        if (companies.isEmpty()) {
+            round(92f, listTop + 120f, width - 92f, listTop + 250f, Color.WHITE, 28f, accent, 4f)
+            canvas.drawText("لا توجد شركات مجدولة في هذه الفترة", width / 2f, listTop + 200f, Paint(cardTextPaint).apply { textAlign = Paint.Align.CENTER; textSize = 34f })
+        } else {
+            var y = listTop
+            companies.forEachIndexed { index, name ->
+                val l = 78f
+                val r = width - 78f
+                val t = y
+                val b = y + rowHeight
+                round(l, t, r, b, Color.WHITE, 24f, accent, 3.5f)
+                val stripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accent; strokeWidth = 8f }
+                canvas.drawLine(r - 10f, t + 10f, r - 10f, b - 10f, stripPaint)
+
+                val numberX = r - 48f
+                val centerY = (t + b) / 2f
+                canvas.drawText((index + 1).toString(), numberX, centerY + numPaint.textSize / 3f, numPaint)
+
+                val textRight = r - 88f
+                val maxTextWidth = r - l - 145f
+                if (rowHeight >= 58f) {
+                    val lines = splitTwoLines(name, cardTextPaint, maxTextWidth)
+                    if (lines.size == 1) {
+                        canvas.drawText(lines[0], textRight, centerY + cardTextPaint.textSize / 3f, cardTextPaint)
+                    } else {
+                        canvas.drawText(lines[0], textRight, centerY - 5f, cardTextPaint)
+                        canvas.drawText(lines[1], textRight, centerY + cardTextPaint.textSize + 4f, cardTextPaint)
+                    }
+                } else {
+                    canvas.drawText(ellipsize(name, cardTextPaint, maxTextWidth), textRight, centerY + cardTextPaint.textSize / 3f, cardTextPaint)
+                }
+                y += rowHeight + gap
+            }
+        }
+
+        val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(96, 125, 155)
+            typeface = cairo
+            textAlign = Paint.Align.CENTER
+            textSize = 42f
+        }
+        canvas.drawText("صيدلية برج الأطباء - إدارة الصيدلية", width / 2f, 1840f, footerPaint)
+
         file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
+
 
     private fun exportCompanies(format: String, companies: List<Company>) {
         val dir = File(getExternalFilesDir(null), "EXPORTS").apply { mkdirs() }
