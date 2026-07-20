@@ -325,7 +325,7 @@ class MainActivity : ComponentActivity() {
             color = Color.rgb(96, 125, 155)
             typeface = cairo
             textAlign = Paint.Align.CENTER
-            textSize = 42f
+            this.textSize = 42f
         }
         canvas.drawText("صيدلية برج الأطباء - إدارة الصيدلية", width / 2f, 1840f, footerPaint)
 
