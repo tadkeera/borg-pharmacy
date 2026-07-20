@@ -308,6 +308,7 @@ class MainActivity : ComponentActivity() {
                             -webkit-print-color-adjust: exact;
                         }
                         
+                        @page { size: A4 portrait; margin: 10mm; }
                         /* تهيئة دقيقة لمعايير الطباعة والـ PDF من الهاتف لضمان مطابقة الـ A4 */
                         @media print {
                             body { background-color: #fff; }
@@ -322,17 +323,22 @@ class MainActivity : ComponentActivity() {
                         
                         /* بطاقة الصفحة الأساسية ذات قياسات الـ A4 النموذجية */
                         .page {
-                            width: 210mm;
-                            height: 297mm;
-                            padding: 12mm 15mm;
+                            width: 190mm;
+                            height: 277mm;
+                            padding: 0;
                             background-color: #f8fafc;
                             margin: 20px auto;
                             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
                             border-radius: 16px;
                             display: flex;
                             flex-direction: column;
+                            overflow: hidden;
+                            break-after: page;
+                            page-break-after: always;
+                            page-break-inside: avoid;
                             border: 1px solid #e2e8f0;
                         }
+                        .first-container { break-after: page; page-break-after: always; }
                         
                         /* الترويسة العلوية الأنيقة */
                         .header {
@@ -358,19 +364,23 @@ class MainActivity : ComponentActivity() {
                         
                         /* شبكة التوزيع الثلاثية (السبت، الأحد، الإثنين) */
                         .grid-3 {
-                            display: grid;
-                            grid-template-columns: repeat(3, 1fr);
+                            display: flex;
                             gap: 12px;
-                            flex: 1;
+                            flex: 1 1 auto;
+                            min-height: 0;
+                            overflow: hidden;
                         }
+                        .grid-3 .day-column { flex: 1 1 33.333%; }
                         
                         /* شبكة التوزيع الثنائية (الثلاثاء، الأربعاء) */
                         .grid-2 {
-                            display: grid;
-                            grid-template-columns: repeat(2, 1fr);
+                            display: flex;
                             gap: 20px;
-                            flex: 1;
+                            flex: 1 1 auto;
+                            min-height: 0;
+                            overflow: hidden;
                         }
+                        .grid-2 .day-column { flex: 1 1 50%; }
                         
                         /* أعمدة الأيام */
                         .day-column {
@@ -381,6 +391,11 @@ class MainActivity : ComponentActivity() {
                             display: flex;
                             flex-direction: column;
                             gap: 10px;
+                            min-width: 0;
+                            min-height: 0;
+                            overflow: hidden;
+                            page-break-inside: avoid;
+                            break-inside: avoid;
                             box-shadow: 0 2px 4px rgba(0,0,0,0.02);
                         }
                         .day-title {
@@ -401,10 +416,14 @@ class MainActivity : ComponentActivity() {
                         .shift {
                             border-radius: 12px;
                             padding: 8px;
-                            flex: 1;
+                            flex: 1 1 0;
+                            min-height: 0;
                             display: flex;
                             flex-direction: column;
                             gap: 6px;
+                            overflow: hidden;
+                            page-break-inside: avoid;
+                            break-inside: avoid;
                         }
                         .morning { background-color: #EAF4FF; }
                         .evening { background-color: #FFF0F4; }
@@ -441,6 +460,8 @@ class MainActivity : ComponentActivity() {
                             gap: 6px;
                             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
                             border-right: 4px solid #cbd5e1;
+                            page-break-inside: avoid;
+                            break-inside: avoid;
                         }
                         .morning .company-card { border-right-color: #0E4D8F; }
                         .evening .company-card { border-right-color: #C8172B; }
@@ -467,7 +488,7 @@ class MainActivity : ComponentActivity() {
                 val weekStart = state.cycleInfo.currentCycleStart.plusDays(((week - 1) * 7).toLong())
                 
                 // الصفحة الأولى: السبت، الأحد، الإثنين
-                append("<section class='page'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - السبت إلى الإثنين</h2></div><div class='grid-3'>")
+                append("<section class='page first-container'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - السبت إلى الإثنين</h2></div><div class='grid-3'>")
                 (0..2).forEach { dayOffset ->
                     val date = weekStart.plusDays(dayOffset.toLong())
                     append("<div class='day-column'><h3 class='day-title'>${esc(date.dayOfWeek.borgArabicName())}<br><span class='day-subtitle'>${date}</span></h3>")
@@ -496,47 +517,85 @@ class MainActivity : ComponentActivity() {
         val currentEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
         val document = PdfDocument()
         val cairo = ResourcesCompat.getFont(this, R.font.cairo_bold) ?: Typeface.DEFAULT_BOLD
-        val pageWidth = 842
-        val pageHeight = 595
-        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(14, 77, 143); textSize = 18f; typeface = cairo; textAlign = Paint.Align.RIGHT }
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8, 43, 82); textSize = 8.5f; typeface = cairo; textAlign = Paint.Align.RIGHT }
+        val pageWidth = 595
+        val pageHeight = 842
+        val margin = 28.35f // 10mm at 72dpi
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8, 43, 82); textSize = 17f; typeface = cairo; textAlign = Paint.Align.RIGHT }
+        val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(14, 77, 143); textSize = 12f; typeface = cairo; textAlign = Paint.Align.LEFT }
+        val dayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8,43,82); textSize = 12f; typeface = cairo; textAlign = Paint.Align.CENTER }
+        val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(100,116,139); textSize = 7.5f; typeface = cairo; textAlign = Paint.Align.CENTER }
+        val rowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(8,43,82); textSize = 8.2f; typeface = cairo; textAlign = Paint.Align.RIGHT }
+        val indexPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(100,116,139); textSize = 7.5f; typeface = cairo; textAlign = Paint.Align.CENTER }
         fun ellipsize(text: String, max: Int) = if (text.length <= max) text else text.take(max - 1) + "…"
+        fun round(canvas: android.graphics.Canvas, l: Float, t: Float, r: Float, b: Float, color: Int, radius: Float = 10f, stroke: Int? = null, strokeWidth: Float = 1f) {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
+            canvas.drawRoundRect(l, t, r, b, radius, radius, p)
+            if (stroke != null) { p.style = Paint.Style.STROKE; p.strokeWidth = strokeWidth; p.color = stroke; canvas.drawRoundRect(l, t, r, b, radius, radius, p) }
+        }
         fun drawShift(canvas: android.graphics.Canvas, x: Float, y: Float, w: Float, h: Float, title: String, visits: List<Visit>, accent: Int, bg: Int) {
-            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bg; style = Paint.Style.FILL }
-            canvas.drawRoundRect(x, y, x + w, y + h, 12f, 12f, p)
-            p.style = Paint.Style.STROKE; p.strokeWidth = 1.2f; p.color = accent; canvas.drawRoundRect(x, y, x + w, y + h, 12f, 12f, p)
-            canvas.drawText("$title (${visits.size})", x + w - 8f, y + 16f, Paint(textPaint).apply { color = accent; textSize = 11f; typeface = Typeface.DEFAULT_BOLD })
-            var cy = y + 30f
+            round(canvas, x, y, x + w, y + h, bg, 9f)
+            val headerPaint = Paint(rowPaint).apply { color = accent; textSize = 9f; typeface = cairo }
+            canvas.drawText("$title  (${visits.size})", x + w - 7f, y + 14f, headerPaint)
+            val available = (h - 24f).coerceAtLeast(12f)
+            val rowH = if (visits.isEmpty()) 16f else (available / visits.size).coerceAtMost(16f).coerceAtLeast(4.2f)
+            val fontSize = (rowH * 0.50f).coerceAtMost(8.2f).coerceAtLeast(3.6f)
+            val dynRowPaint = Paint(rowPaint).apply { textSize = fontSize; typeface = cairo }
+            val dynIndexPaint = Paint(indexPaint).apply { textSize = (fontSize * .90f).coerceAtLeast(3.2f); typeface = cairo }
+            var cy = y + 23f
             visits.forEachIndexed { index, visit ->
-                if (cy > y + h - 8f) return@forEachIndexed
-                canvas.drawText("${index + 1}. ${ellipsize(companies[visit.companyId]?.name ?: "شركة غير معروفة", 24)}", x + w - 8f, cy, textPaint)
-                cy += 16f
+                if (cy >= y + h - 2f) return@forEachIndexed
+                val cardTop = cy
+                val cardBottom = (cy + rowH * .82f).coerceAtMost(y + h - 2f)
+                round(canvas, x + 5f, cardTop, x + w - 5f, cardBottom, Color.WHITE, 6f)
+                val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accent; strokeWidth = 2f }
+                canvas.drawLine(x + w - 7f, cardTop + 1f, x + w - 7f, cardBottom - 1f, linePaint)
+                val baseline = cardTop + (cardBottom - cardTop) * .66f
+                canvas.drawText((index + 1).toString(), x + w - 17f, baseline, dynIndexPaint)
+                val maxChars = when { fontSize < 4.5f -> 30; fontSize < 6f -> 26; else -> 23 }
+                canvas.drawText(ellipsize(companies[visit.companyId]?.name ?: "شركة غير معروفة", maxChars), x + w - 30f, baseline, dynRowPaint)
+                cy += rowH
             }
+        }
+        fun drawPage(week: Int, title: String, range: IntRange, pageNo: Int) {
+            val weekStart = state.cycleInfo.currentCycleStart.plusDays(((week - 1) * 7).toLong())
+            val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo).create())
+            val c = page.canvas
+            c.drawColor(Color.WHITE)
+            val l = margin
+            val t = margin
+            val r = pageWidth - margin
+            val b = pageHeight - margin
+            c.drawText("جداول زيارات صيدلية برج الأطباء", r, t + 18f, titlePaint)
+            c.drawText(title, l, t + 18f, subtitlePaint)
+            val underline = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(14,77,143); strokeWidth = 3f }
+            c.drawLine(l, t + 30f, r, t + 30f, underline)
+            val cols = range.count()
+            val gap = 10f
+            val top = t + 44f
+            val colH = b - top
+            val colW = (r - l - (cols - 1) * gap) / cols
+            range.forEachIndexed { i, dayOffset ->
+                val x = l + i * (colW + gap)
+                val date = weekStart.plusDays(dayOffset.toLong())
+                round(c, x, top, x + colW, top + colH, Color.WHITE, 12f, Color.rgb(226,232,240), 1f)
+                c.drawText(date.dayOfWeek.borgArabicName(), x + colW / 2, top + 18f, dayPaint)
+                c.drawText(date.toString(), x + colW / 2, top + 31f, smallPaint)
+                val dayVisits = state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == date }
+                val shiftTop = top + 43f
+                val shiftH = (colH - 50f) / 2f
+                drawShift(c, x + 7f, shiftTop, colW - 14f, shiftH, "الفترة الصباحية", dayVisits.filter { it.shift == Shift.MORNING }.scheduleDisplaySorted(), Color.rgb(14,77,143), Color.rgb(234,244,255))
+                drawShift(c, x + 7f, shiftTop + shiftH + 8f, colW - 14f, shiftH, "الفترة المسائية", dayVisits.filter { it.shift == Shift.EVENING }.scheduleDisplaySorted(), Color.rgb(200,23,43), Color.rgb(255,240,244))
+            }
+            document.finishPage(page)
         }
         var pageNo = 1
         (1..4).forEach { week ->
-            val weekStart = state.cycleInfo.currentCycleStart.plusDays(((week - 1) * 7).toLong())
-            listOf(0..2, 3..4).forEachIndexed { pageIndex, range ->
-                val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo++).create())
-                val c = page.canvas
-                c.drawColor(Color.WHITE)
-                c.drawText("جداول زيارات صيدلية برج الأطباء", pageWidth - 32f, 42f, titlePaint)
-                c.drawText("الأسبوع $week - ${if (pageIndex == 0) "السبت / الأحد / الإثنين" else "الثلاثاء / الأربعاء"}", 390f, 42f, Paint(titlePaint).apply { textAlign = Paint.Align.CENTER; textSize = 14f })
-                val cols = range.count(); val gap = 10f; val left = 30f; val top = 65f; val colW = (pageWidth - 60f - (cols - 1) * gap) / cols; val colH = pageHeight - 92f
-                range.forEachIndexed { i, dayOffset ->
-                    val x = left + i * (colW + gap); val date = weekStart.plusDays(dayOffset.toLong())
-                    c.drawText(date.dayOfWeek.borgArabicName(), x + colW / 2, top + 18f, Paint(titlePaint).apply { textAlign = Paint.Align.CENTER; textSize = 13f; color = Color.rgb(8,43,82) })
-                    val dayVisits = state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == date }
-                    drawShift(c, x, top + 32f, colW, (colH - 38f) / 2f, "الصباح", dayVisits.filter { it.shift == Shift.MORNING }.scheduleDisplaySorted(), Color.rgb(14,77,143), Color.rgb(234,244,255))
-                    drawShift(c, x, top + 38f + (colH - 38f) / 2f, colW, (colH - 38f) / 2f, "المساء", dayVisits.filter { it.shift == Shift.EVENING }.scheduleDisplaySorted(), Color.rgb(200,23,43), Color.rgb(255,240,244))
-                }
-                document.finishPage(page)
-            }
+            drawPage(week, "الأسبوع $week - السبت إلى الإثنين", 0..2, pageNo++)
+            drawPage(week, "الأسبوع $week - الثلاثاء والأربعاء", 3..4, pageNo++)
         }
         file.outputStream().use { document.writeTo(it) }
         document.close()
     }
-
     private fun List<Visit>.scheduleDisplaySorted(): List<Visit> = sortedWith(compareBy<Visit> { it.createdAt }.thenBy { it.id })
 
     private fun shareLatestBackupToDrive() {

@@ -731,37 +731,37 @@ private fun WeeklyScreen(state: BorgUiState, onExportSchedules: (String) -> Unit
         
         Column(Modifier.padding(horizontal = 16.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFFE2EBF5))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(Color(0xFFE2EBF5))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    (1..4).forEach { week ->
-                        val active = selectedWeek == week
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(if (active) Color.White else Color.Transparent)
-                                .clickable { selectedWeek = week }
-                                .padding(horizontal = 14.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "الأسبوع $week",
-                                color = if (active) DeepNavy else Color(0xFF5A728E),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                        }
+                (1..4).forEach { week ->
+                    val active = selectedWeek == week
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (active) Color.White else Color.Transparent)
+                            .clickable { selectedWeek = week }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "الأسبوع $week",
+                            color = if (active) DeepNavy else Color(0xFF5A728E),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
-                
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 ExportDropdown(label = "تصدير", onExport = onExportSchedules)
             }
         }
