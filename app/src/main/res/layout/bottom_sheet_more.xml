@@ -30,7 +30,7 @@
         android:paddingEnd="16dp"
         android:clickable="true"
         android:focusable="true"
-        android:background="?attr/selectableItemBackground">
+        android:background="?android:attr/selectableItemBackground">
         <ImageView
             android:layout_width="32dp"
             android:layout_height="32dp"
@@ -58,7 +58,7 @@
         android:paddingEnd="16dp"
         android:clickable="true"
         android:focusable="true"
-        android:background="?attr/selectableItemBackground">
+        android:background="?android:attr/selectableItemBackground">
         <ImageView
             android:layout_width="32dp"
             android:layout_height="32dp"
@@ -86,7 +86,7 @@
         android:paddingEnd="16dp"
         android:clickable="true"
         android:focusable="true"
-        android:background="?attr/selectableItemBackground">
+        android:background="?android:attr/selectableItemBackground">
         <ImageView
             android:layout_width="32dp"
             android:layout_height="32dp"
