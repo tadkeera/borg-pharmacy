@@ -370,8 +370,12 @@
       openSuggestions();
     }
 
+    function cleanCompanyName(value) {
+      return String(value ?? "").trim().replace(/^[\"'“”‘’]+|[\"'“”‘’]+$/g, "").trim();
+    }
+
     function getCompanyDisplayName(row) {
-      return row?.name ?? row?.company_name ?? row?.[companyNameColumn] ?? "";
+      return cleanCompanyName(row?.name ?? row?.company_name ?? row?.[companyNameColumn] ?? "");
     }
 
     async function queryCompaniesByColumn(column, term) {
