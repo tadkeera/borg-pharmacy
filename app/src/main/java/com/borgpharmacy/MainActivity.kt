@@ -267,246 +267,230 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun writeSchedulesHtml(file: File, state: BorgUiState) {
-        fun esc(value: String): String = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+        fun esc(value: String): String = value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
         val companies = state.companies.associateBy { it.id }
         val currentEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
-        
-        // دالة فرعية لإنشاء كتل الفترات الصباحية والمسائية بتنسيق مطابق لكروت الشركات بالتطبيق
+
         fun listHtml(date: java.time.LocalDate, shift: Shift): String {
-            val visits = state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == date && it.shift == shift }.scheduleDisplaySorted()
+            val visits = state.visits
+                .filter { it.cycleStartEpochDay == currentEpoch && it.date == date && it.shift == shift }
+                .scheduleDisplaySorted()
+            val densityClass = when {
+                visits.size >= 28 -> " ultra-dense"
+                visits.size >= 20 -> " very-dense"
+                visits.size >= 14 -> " dense"
+                else -> ""
+            }
             return buildString {
-                append("<div class='shift ${if (shift == Shift.MORNING) "morning" else "evening"}'>")
-                append("<h4 class='shift-title'>${esc(shift.arabicName)} <span class='badge'>${visits.size}</span></h4>")
+                append("<section class='shift ${if (shift == Shift.MORNING) "morning" else "evening"}$densityClass'>")
+                append("<header class='shift-title'><span>${esc(shift.arabicName)}</span><b>${visits.size}</b></header>")
+                append("<div class='visit-list'>")
                 visits.forEachIndexed { index, visit ->
                     val companyName = companies[visit.companyId]?.name ?: "شركة غير معروفة"
-                    append("<div class='company-card'>")
+                    append("<article class='company-card'>")
                     append("<span class='index'>${index + 1}</span>")
                     append("<span class='name'>${esc(companyName)}</span>")
-                    append("</div>")
+                    append("</article>")
                 }
+                append("</div></section>")
+            }
+        }
+
+        fun dayHtml(weekStart: java.time.LocalDate, dayOffset: Int): String {
+            val date = weekStart.plusDays(dayOffset.toLong())
+            return buildString {
+                append("<div class='day-column'>")
+                append("<h3 class='day-title'>${esc(date.dayOfWeek.borgArabicName())}<br><span>${date}</span></h3>")
+                append(listHtml(date, Shift.MORNING))
+                append(listHtml(date, Shift.EVENING))
                 append("</div>")
             }
         }
-        
+
         file.writeText(buildString {
             append("""
                 <!DOCTYPE html>
                 <html lang="ar" dir="rtl">
                 <head>
-                    <meta charset="UTF-8">
-                    <title>جداول زيارات صيدلية برج الأطباء</title>
-                    <style>
-                        /* استيراد الخط المعتمد بالتطبيق مباشرة لضمان انتظام المظهر البصري */
-                        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;800;900&display=swap');
-                        * { box-sizing: border-box; }
-                        
-                        body {
-                            font-family: 'Cairo', Tahoma, sans-serif;
-                            margin: 0;
-                            padding: 0;
-                            background-color: #cbd5e1;
-                            -webkit-print-color-adjust: exact;
-                        }
-                        
-                        @page { size: A4 portrait; margin: 10mm; }
-                        /* تهيئة دقيقة لمعايير الطباعة والـ PDF من الهاتف لضمان مطابقة الـ A4 */
-                        @media print {
-                            body { background-color: #fff; }
-                            .page {
-                                page-break-after: always;
-                                box-shadow: none !important;
-                                border: none !important;
-                                margin: 0 !important;
-                                background-color: #fff !important;
-                            }
-                        }
-                        
-                        /* بطاقة الصفحة الأساسية ذات قياسات الـ A4 النموذجية */
-                        .page {
-                            width: 190mm;
-                            height: 277mm;
-                            padding: 0;
-                            background-color: #f8fafc;
-                            margin: 20px auto;
-                            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                            border-radius: 16px;
-                            display: flex;
-                            flex-direction: column;
-                            overflow: hidden;
-                            break-after: page;
-                            page-break-after: always;
-                            page-break-inside: avoid;
-                            border: 1px solid #e2e8f0;
-                        }
-                        .first-container { break-after: page; page-break-after: always; }
-                        
-                        /* الترويسة العلوية الأنيقة */
-                        .header {
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                            border-bottom: 4px solid #0E4D8F;
-                            padding-bottom: 10px;
-                            margin-bottom: 15px;
-                        }
-                        .header h1 {
-                            font-size: 20px;
-                            font-weight: 900;
-                            color: #082B52;
-                            margin: 0;
-                        }
-                        .header h2 {
-                            font-size: 15px;
-                            font-weight: 700;
-                            color: #0E4D8F;
-                            margin: 0;
-                        }
-                        
-                        /* شبكة التوزيع الثلاثية (السبت، الأحد، الإثنين) */
-                        .grid-3 {
-                            display: flex;
-                            gap: 12px;
-                            flex: 1 1 auto;
-                            min-height: 0;
-                            overflow: hidden;
-                        }
-                        .grid-3 .day-column { flex: 1 1 33.333%; }
-                        
-                        /* شبكة التوزيع الثنائية (الثلاثاء، الأربعاء) */
-                        .grid-2 {
-                            display: flex;
-                            gap: 20px;
-                            flex: 1 1 auto;
-                            min-height: 0;
-                            overflow: hidden;
-                        }
-                        .grid-2 .day-column { flex: 1 1 50%; }
-                        
-                        /* أعمدة الأيام */
-                        .day-column {
-                            background-color: #ffffff;
-                            border: 1px solid #e2e8f0;
-                            border-radius: 16px;
-                            padding: 10px;
-                            display: flex;
-                            flex-direction: column;
-                            gap: 10px;
-                            min-width: 0;
-                            min-height: 0;
-                            overflow: hidden;
-                            page-break-inside: avoid;
-                            break-inside: avoid;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-                        }
-                        .day-title {
-                            text-align: center;
-                            font-size: 15px;
-                            font-weight: 900;
-                            color: #082B52;
-                            margin: 0;
-                            line-height: 1.2;
-                        }
-                        .day-subtitle {
-                            font-size: 11px;
-                            color: #64748b;
-                            font-weight: 700;
-                        }
-                        
-                        /* حاويات الفترات الملونة المريحة للعين */
-                        .shift {
-                            border-radius: 12px;
-                            padding: 8px;
-                            flex: 1 1 0;
-                            min-height: 0;
-                            display: flex;
-                            flex-direction: column;
-                            gap: 6px;
-                            overflow: hidden;
-                            page-break-inside: avoid;
-                            break-inside: avoid;
-                        }
-                        .morning { background-color: #EAF4FF; }
-                        .evening { background-color: #FFF0F4; }
-                        
-                        .shift-title {
-                            font-size: 12px;
-                            font-weight: 850;
-                            margin: 0 0 4px 0;
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                        }
-                        .morning .shift-title { color: #0E4D8F; }
-                        .evening .shift-title { color: #C8172B; }
-                        
-                        .badge {
-                            background-color: rgba(255,255,255,0.7);
-                            padding: 1px 6px;
-                            border-radius: 50px;
-                            font-size: 10px;
-                            font-weight: 800;
-                        }
-                        
-                        /* بطاقة الشركة المستوحاة من كروت الشركات بالتطبيق وبشريط جانبي ملون مميز (RTL) */
-                        .company-card {
-                            background-color: #ffffff;
-                            border-radius: 8px;
-                            padding: 8px 10px;
-                            font-size: 12px;
-                            font-weight: 800; /* خط عريض وبارز */
-                            color: #082B52;
-                            display: flex;
-                            align-items: center;
-                            gap: 6px;
-                            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-                            border-right: 4px solid #cbd5e1;
-                            page-break-inside: avoid;
-                            break-inside: avoid;
-                        }
-                        .morning .company-card { border-right-color: #0E4D8F; }
-                        .evening .company-card { border-right-color: #C8172B; }
-                        
-                        .index {
-                            font-weight: 900;
-                            color: #64748b;
-                            width: 14px;
-                            text-align: center;
-                        }
-                        
-                        /* خاصية التفاف النص التلقائي لأسفل لكي يظهر اسم الشركة كاملاً في حال كان طويلاً */
-                        .name {
-                            word-break: break-word;
-                            line-height: 1.35;
-                        }
-                    </style>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>جداول زيارات صيدلية برج الأطباء</title>
+                  <style>
+                    @page { size: A4 portrait; margin: 10mm; }
+                    * { box-sizing: border-box; }
+                    html, body { margin: 0; padding: 0; }
+                    body {
+                      font-family: 'Cairo', 'Tajawal', Tahoma, Arial, sans-serif;
+                      background: #e8eef6;
+                      color: #082B52;
+                      -webkit-print-color-adjust: exact;
+                      print-color-adjust: exact;
+                    }
+                    .print-page {
+                      width: 190mm;
+                      height: 277mm;
+                      margin: 0 auto 12px auto;
+                      padding: 0;
+                      display: flex;
+                      flex-direction: column;
+                      overflow: hidden;
+                      break-after: page;
+                      page-break-after: always;
+                      page-break-inside: avoid;
+                      background: #f8fafc;
+                      border: 1px solid #e2e8f0;
+                      border-radius: 14px;
+                    }
+                    .print-page.first { break-after: page; page-break-after: always; }
+                    .print-page:last-child { break-after: auto; page-break-after: auto; }
+                    .page-header {
+                      flex: 0 0 auto;
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      padding: 0 0 5mm 0;
+                      margin: 0 0 4mm 0;
+                      border-bottom: 1.2mm solid #0E4D8F;
+                      page-break-inside: avoid;
+                    }
+                    .page-header h1 { margin: 0; font-size: 17pt; font-weight: 900; color: #082B52; line-height: 1.15; }
+                    .page-header h2 { margin: 0; font-size: 12pt; font-weight: 900; color: #0E4D8F; line-height: 1.15; }
+                    .days-grid {
+                      flex: 1 1 auto;
+                      min-height: 0;
+                      display: flex;
+                      gap: 4mm;
+                      overflow: hidden;
+                    }
+                    .days-grid.three .day-column { flex: 1 1 33.333%; }
+                    .days-grid.two .day-column { flex: 1 1 50%; }
+                    .day-column {
+                      min-width: 0;
+                      min-height: 0;
+                      background: #ffffff;
+                      border: 0.35mm solid #e2e8f0;
+                      border-radius: 5mm;
+                      padding: 3mm;
+                      display: flex;
+                      flex-direction: column;
+                      gap: 3mm;
+                      overflow: hidden;
+                      page-break-inside: avoid;
+                      break-inside: avoid;
+                    }
+                    .day-title {
+                      flex: 0 0 auto;
+                      text-align: center;
+                      margin: 0;
+                      color: #082B52;
+                      font-size: 12pt;
+                      font-weight: 900;
+                      line-height: 1.1;
+                      page-break-inside: avoid;
+                    }
+                    .day-title span { color: #64748b; font-size: 8pt; font-weight: 800; }
+                    .shift {
+                      flex: 1 1 0;
+                      min-height: 0;
+                      border-radius: 4mm;
+                      padding: 2.2mm;
+                      display: flex;
+                      flex-direction: column;
+                      gap: 1.7mm;
+                      overflow: hidden;
+                      page-break-inside: avoid;
+                      break-inside: avoid;
+                    }
+                    .morning { background: #EAF4FF; }
+                    .evening { background: #FFF0F4; }
+                    .shift-title {
+                      flex: 0 0 auto;
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      margin: 0;
+                      font-size: 9pt;
+                      font-weight: 900;
+                      line-height: 1.1;
+                      page-break-inside: avoid;
+                    }
+                    .morning .shift-title { color: #0E4D8F; }
+                    .evening .shift-title { color: #C8172B; }
+                    .shift-title b {
+                      display: inline-flex;
+                      align-items: center;
+                      justify-content: center;
+                      min-width: 7mm;
+                      height: 6mm;
+                      border-radius: 99px;
+                      background: rgba(255,255,255,.78);
+                      font-size: 8pt;
+                    }
+                    .visit-list {
+                      flex: 1 1 auto;
+                      min-height: 0;
+                      display: flex;
+                      flex-direction: column;
+                      gap: 1.35mm;
+                      overflow: hidden;
+                    }
+                    .company-card {
+                      flex: 0 1 auto;
+                      display: flex;
+                      align-items: center;
+                      gap: 1.6mm;
+                      width: 100%;
+                      background: #ffffff;
+                      border-radius: 2.8mm;
+                      padding: 1.8mm 2.2mm;
+                      color: #082B52;
+                      font-size: 8.3pt;
+                      font-weight: 900;
+                      line-height: 1.2;
+                      box-shadow: 0 0.6mm 1.2mm rgba(15,23,42,.06);
+                      border-right: 1.1mm solid #cbd5e1;
+                      page-break-inside: avoid;
+                      break-inside: avoid;
+                      overflow: hidden;
+                    }
+                    .dense .company-card { font-size: 7.3pt; padding-top: 1.25mm; padding-bottom: 1.25mm; line-height: 1.08; }
+                    .very-dense .company-card { font-size: 6.4pt; padding-top: .85mm; padding-bottom: .85mm; line-height: 1.02; }
+                    .ultra-dense .company-card { font-size: 5.5pt; padding-top: .55mm; padding-bottom: .55mm; line-height: .98; }
+                    .morning .company-card { border-right-color: #0E4D8F; }
+                    .evening .company-card { border-right-color: #C8172B; }
+                    .index {
+                      flex: 0 0 6mm;
+                      text-align: center;
+                      font-weight: 900;
+                      color: #64748b;
+                    }
+                    .name {
+                      flex: 1 1 auto;
+                      min-width: 0;
+                      white-space: normal;
+                      overflow-wrap: anywhere;
+                      word-break: normal;
+                    }
+                    @media print {
+                      body { background: #fff; }
+                      .print-page { margin: 0; border: none; border-radius: 0; box-shadow: none; }
+                    }
+                  </style>
                 </head>
                 <body>
             """.trimIndent())
-            
-            // التكرار لكل أسابيع الدورة الأربعة لإنشاء صفحات منفصلة
+
             (1..4).forEach { week ->
                 val weekStart = state.cycleInfo.currentCycleStart.plusDays(((week - 1) * 7).toLong())
-                
-                // الصفحة الأولى: السبت، الأحد، الإثنين
-                append("<section class='page first-container'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - السبت إلى الإثنين</h2></div><div class='grid-3'>")
-                (0..2).forEach { dayOffset ->
-                    val date = weekStart.plusDays(dayOffset.toLong())
-                    append("<div class='day-column'><h3 class='day-title'>${esc(date.dayOfWeek.borgArabicName())}<br><span class='day-subtitle'>${date}</span></h3>")
-                    append(listHtml(date, Shift.MORNING))
-                    append(listHtml(date, Shift.EVENING))
-                    append("</div>")
-                }
+                append("<section class='print-page first'><div class='page-header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - السبت إلى الإثنين</h2></div><div class='days-grid three'>")
+                (0..2).forEach { dayOffset -> append(dayHtml(weekStart, dayOffset)) }
                 append("</div></section>")
-                
-                // الصفحة الثانية: الثلاثاء، الأربعاء
-                append("<section class='page'><div class='header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - الثلاثاء والأربعاء</h2></div><div class='grid-2'>")
-                (3..4).forEach { dayOffset ->
-                    val date = weekStart.plusDays(dayOffset.toLong())
-                    append("<div class='day-column'><h3 class='day-title'>${esc(date.dayOfWeek.borgArabicName())}<br><span class='day-subtitle'>${date}</span></h3>")
-                    append(listHtml(date, Shift.MORNING))
-                    append(listHtml(date, Shift.EVENING))
-                    append("</div>")
-                }
+                append("<section class='print-page'><div class='page-header'><h1>جداول زيارات صيدلية برج الأطباء</h1><h2>الأسبوع $week - الثلاثاء والأربعاء</h2></div><div class='days-grid two'>")
+                (3..4).forEach { dayOffset -> append(dayHtml(weekStart, dayOffset)) }
                 append("</div></section>")
             }
             append("</body></html>")
@@ -596,6 +580,7 @@ class MainActivity : ComponentActivity() {
         file.outputStream().use { document.writeTo(it) }
         document.close()
     }
+
     private fun List<Visit>.scheduleDisplaySorted(): List<Visit> = sortedWith(compareBy<Visit> { it.createdAt }.thenBy { it.id })
 
     private fun shareLatestBackupToDrive() {
