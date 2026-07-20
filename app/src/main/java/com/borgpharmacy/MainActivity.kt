@@ -446,7 +446,7 @@ class MainActivity : ComponentActivity() {
                       width: 100%;
                       background: #ffffff;
                       border-radius: 2.8mm;
-                      padding: 1.8mm 2.2mm;
+                      padding: 1.55mm 1.45mm;
                       color: #082B52;
                       font-size: 8.3pt;
                       font-weight: 900;
@@ -457,9 +457,9 @@ class MainActivity : ComponentActivity() {
                       break-inside: avoid;
                       overflow: hidden;
                     }
-                    .dense .company-card { font-size: 7.3pt; padding-top: 1.25mm; padding-bottom: 1.25mm; line-height: 1.08; }
-                    .very-dense .company-card { font-size: 6.4pt; padding-top: .85mm; padding-bottom: .85mm; line-height: 1.02; }
-                    .ultra-dense .company-card { font-size: 5.5pt; padding-top: .55mm; padding-bottom: .55mm; line-height: .98; }
+                    .dense .company-card { font-size: 7.3pt; padding: 1.15mm 1.25mm; line-height: 1.12; }
+                    .very-dense .company-card { font-size: 6.4pt; padding: .75mm 1.05mm; line-height: 1.06; }
+                    .ultra-dense .company-card { font-size: 5.5pt; padding: .48mm .85mm; line-height: 1.0; }
                     .morning .company-card { border-right-color: #0E4D8F; }
                     .evening .company-card { border-right-color: #C8172B; }
                     .index {
