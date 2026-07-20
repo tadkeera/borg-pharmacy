@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Print
@@ -53,6 +54,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -126,6 +128,7 @@ private enum class Route(val label: String, val icon: ImageVector) {
     BOT("البوت", Icons.Default.Sync),
     DASHBOARD("التقارير", Icons.Default.Assessment),
     SETTINGS("الإعدادات", Icons.Default.Settings),
+    MORE("المزيد", Icons.Default.MoreHoriz),
 }
 
 
@@ -236,6 +239,7 @@ fun BorgApp(
     onDeleteRepresentative: (String) -> Unit,
     onCreateUser: (String, String, UserRole, String) -> Unit,
     onMarkVisitStatus: (String, VisitStatus) -> Unit,
+    onShareToday: () -> Unit,
     onPrint: (Company, Representative, Visit) -> Unit,
     onWhatsApp: (Company, Representative) -> Unit,
     onBackup: () -> Unit,
@@ -269,17 +273,29 @@ fun BorgApp(
         }
 
         var route by rememberSaveable { mutableStateOf(Route.HOME.name) }
+        var showMoreSheet by rememberSaveable { mutableStateOf(false) }
         val selected = Route.valueOf(route)
+        val mainRoutes = listOf(Route.HOME, Route.WEEKLY, Route.COMPANIES, Route.DASHBOARD, Route.MORE)
+        if (showMoreSheet) {
+            MoreRoutesBottomSheet(
+                onDismiss = { showMoreSheet = false },
+                onRouteSelected = { target ->
+                    route = target.name
+                    showMoreSheet = false
+                }
+            )
+        }
         Scaffold(
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = { BorgTopBar(state = state, onLogout = onLogout) },
             bottomBar = {
                 NavigationBar(containerColor = Color.White, tonalElevation = 8.dp) {
-                    Route.entries.forEach { item ->
+                    mainRoutes.forEach { item ->
+                        val itemSelected = selected == item || (item == Route.MORE && selected in listOf(Route.BOT, Route.ENQUIRIES, Route.SETTINGS))
                         NavigationBarItem(
-                            selected = selected == item,
-                            onClick = { route = item.name },
-                            icon = { BorgColoredIcon(item, selected == item) },
+                            selected = itemSelected,
+                            onClick = { if (item == Route.MORE) showMoreSheet = true else route = item.name },
+                            icon = { BorgColoredIcon(item, itemSelected) },
                             label = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = BorgBlue,
@@ -298,7 +314,7 @@ fun BorgApp(
                 .fillMaxSize()
                 .background(Color(0xFFF4F7FC))
             when (selected) {
-                Route.HOME -> HomeScreen(state, onPrint, onMarkVisitStatus, onSync, contentModifier)
+                Route.HOME -> HomeScreen(state, onPrint, onMarkVisitStatus, onShareToday, onSync, contentModifier)
                 Route.WEEKLY -> WeeklyScreen(state, onExportSchedules, contentModifier)
                 Route.COMPANIES -> CompanyProfilesScreen(
                     state = state,
@@ -360,6 +376,31 @@ private fun BorgTopBar(state: BorgUiState, onLogout: () -> Unit) {
             IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, contentDescription = "تسجيل الخروج", tint = BorgRed) }
         },
     )
+}
+
+@Composable
+private fun MoreRoutesBottomSheet(onDismiss: () -> Unit, onRouteSelected: (Route) -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("المزيد", color = DeepNavy, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 6.dp))
+            listOf(Route.BOT, Route.ENQUIRIES, Route.SETTINGS).forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xFFF4F8FC))
+                        .clickable { onRouteSelected(item) }
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(Modifier.size(44.dp).clip(CircleShape).background(SoftBlue), contentAlignment = Alignment.Center) { BorgColoredIcon(item, true) }
+                    Text(item.label, color = DeepNavy, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+        }
+    }
 }
 
 @Composable
@@ -470,6 +511,7 @@ private fun HomeScreen(
     state: BorgUiState,
     onPrint: (Company, Representative, Visit) -> Unit,
     onMarkVisitStatus: (String, VisitStatus) -> Unit,
+    onShareToday: () -> Unit,
     onSync: () -> Unit,
     modifier: Modifier,
 ) {
@@ -485,6 +527,7 @@ private fun HomeScreen(
                 cycleEnd = state.cycleInfo.currentCycleEnd,
                 week = state.cycleInfo.weekOfCycle,
                 totalVisits = visitsToday.size,
+                onShare = onShareToday,
                 onSync = onSync,
             )
         }
@@ -524,6 +567,7 @@ private fun HomeHeroCard(
     cycleEnd: LocalDate,
     week: Int,
     totalVisits: Int,
+    onShare: () -> Unit,
     onSync: () -> Unit,
 ) {
     Card(
@@ -562,6 +606,7 @@ private fun HomeHeroCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     GlassPill("الأسبوع $week")
                     GlassPill("$totalVisits زيارة")
+                    OutlinedButton(onClick = onShare) { Text("مشاركة", color = Color.White) }
                     IconButton(onClick = onSync) { Icon(Icons.Default.Sync, contentDescription = "مزامنة", tint = Color.White) }
                 }
                 Text("الدورة: من ${cycleStart.format(shortDateFormatter)} إلى ${cycleEnd.format(shortDateFormatter)}", color = Color.White.copy(alpha = 0.88f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_today"
+        android:icon="@drawable/ic_nav_today"
+        android:title="اليوم" />
+    <item
+        android:id="@+id/nav_weekly"
+        android:icon="@drawable/ic_nav_weekly"
+        android:title="الأسابيع" />
+    <item
+        android:id="@+id/nav_companies"
+        android:icon="@drawable/ic_nav_companies"
+        android:title="الشركات" />
+    <item
+        android:id="@+id/nav_reports"
+        android:icon="@drawable/ic_nav_reports"
+        android:title="التقارير" />
+    <item
+        android:id="@+id/nav_more"
+        android:icon="@drawable/ic_nav_more"
+        android:title="المزيد" />
+</menu>

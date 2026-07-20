@@ -2,15 +2,22 @@ package com.borgpharmacy
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -87,6 +94,7 @@ class MainActivity : ComponentActivity() {
                 onSaveBotSettings = viewModel::saveBotSettings,
                 onRefreshBotData = viewModel::refreshBotSettings,
                 onMarkVisitStatus = viewModel::markVisitStatus,
+                onShareToday = { shareTodayStories(state) },
                 onPrint = { company: Company, rep: Representative, visit: Visit ->
                     printer.printPass(company, rep, visit)
                     viewModel.recordPrint(rep.id, visit.id)
@@ -106,6 +114,116 @@ class MainActivity : ComponentActivity() {
                 onDismissMessage = viewModel::clearSnackbar,
             )
         }
+    }
+
+    private fun shareTodayStories(state: BorgUiState) {
+        val currentEpoch = state.cycleInfo.currentCycleStart.toEpochDay()
+        val today = state.cycleInfo.today
+        val companies = state.companies.associateBy { it.id }
+        val todayVisits = state.visits.filter { it.cycleStartEpochDay == currentEpoch && it.date == today }
+        val morning = todayVisits.filter { it.shift == Shift.MORNING }.scheduleDisplaySorted().mapNotNull { companies[it.companyId]?.name }
+        val evening = todayVisits.filter { it.shift == Shift.EVENING }.scheduleDisplaySorted().mapNotNull { companies[it.companyId]?.name }
+
+        val shareDir = File(cacheDir, "story_shares").apply { mkdirs() }
+        val morningFile = File(shareDir, "borg_morning_story.png")
+        val eveningFile = File(shareDir, "borg_evening_story.png")
+        createStoryBitmap(
+            dateText = today.dayOfWeek.borgArabicName() + " - " + today.toString(),
+            weekText = "الأسبوع ${state.cycleInfo.weekOfCycle}",
+            shiftTitle = "الفترة الصباحية",
+            shiftIcon = "☀️",
+            companies = morning,
+            accent = Color.rgb(14, 101, 168),
+            soft = Color.rgb(234, 244, 255),
+            file = morningFile,
+        )
+        createStoryBitmap(
+            dateText = today.dayOfWeek.borgArabicName() + " - " + today.toString(),
+            weekText = "الأسبوع ${state.cycleInfo.weekOfCycle}",
+            shiftTitle = "الفترة المسائية",
+            shiftIcon = "🌙",
+            companies = evening,
+            accent = Color.rgb(200, 23, 69),
+            soft = Color.rgb(255, 240, 245),
+            file = eveningFile,
+        )
+        val uris = arrayListOf(
+            (application as BorgPharmacyApplication).container.backupService.uriFor(morningFile),
+            (application as BorgPharmacyApplication).container.backupService.uriFor(eveningFile),
+        )
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "image/png"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            putExtra(Intent.EXTRA_TEXT, "جداول زيارات اليوم - صيدلية برج الأطباء")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "مشاركة كحالة واتساب"))
+    }
+
+    private fun createStoryBitmap(
+        dateText: String,
+        weekText: String,
+        shiftTitle: String,
+        shiftIcon: String,
+        companies: List<String>,
+        accent: Int,
+        soft: Int,
+        file: File,
+    ) {
+        val width = 1080
+        val height = 1920
+        val root = layoutInflater.inflate(R.layout.share_story_schedule, null)
+        root.layoutParams = ViewGroup.LayoutParams(width, height)
+        val header = root.findViewById<LinearLayout>(R.id.story_header)
+        header.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(36, 91, 199), Color.rgb(47, 145, 241))).apply { cornerRadius = 46f }
+        root.findViewById<TextView>(R.id.story_date).text = dateText
+        root.findViewById<TextView>(R.id.story_week).text = weekText
+        root.findViewById<TextView>(R.id.story_shift_title).text = shiftTitle
+        root.findViewById<TextView>(R.id.story_shift_icon).text = shiftIcon
+        val list = root.findViewById<LinearLayout>(R.id.story_company_list)
+        list.removeAllViews()
+        companies.forEachIndexed { index, name ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                layoutDirection = View.LAYOUT_DIRECTION_RTL
+                background = GradientDrawable().apply {
+                    setColor(Color.WHITE)
+                    cornerRadius = 28f
+                    setStroke(4, accent)
+                }
+                setPadding(26, 18, 26, 18)
+            }
+            row.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 0, 0, 18) }
+            val number = TextView(this).apply {
+                text = (index + 1).toString()
+                setTextColor(accent)
+                textSize = 22f
+                typeface = Typeface.create(ResourcesCompat.getFont(this@MainActivity, R.font.cairo_bold), Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+            }
+            number.layoutParams = LinearLayout.LayoutParams(70, 70)
+            val title = TextView(this).apply {
+                text = name
+                setTextColor(Color.rgb(7, 31, 58))
+                textSize = if (companies.size > 22) 22f else 28f
+                typeface = Typeface.create(ResourcesCompat.getFont(this@MainActivity, R.font.cairo_bold), Typeface.BOLD)
+                gravity = android.view.Gravity.RIGHT
+                setLineSpacing(0f, 1.05f)
+            }
+            title.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            row.addView(number)
+            row.addView(title)
+            list.addView(row)
+        }
+        val shiftHeader = root.findViewById<LinearLayout>(R.id.story_shift_header)
+        shiftHeader.background = GradientDrawable().apply { setColor(soft); cornerRadius = 34f; setStroke(3, accent) }
+        root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+        root.layout(0, 0, width, height)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        root.draw(canvas)
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun exportCompanies(format: String, companies: List<Company>) {

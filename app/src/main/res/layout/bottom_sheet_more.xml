@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="20dp"
+    android:paddingTop="18dp"
+    android:paddingEnd="20dp"
+    android:paddingBottom="28dp"
+    android:background="#FFFFFF"
+    android:layoutDirection="rtl">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="المزيد"
+        android:textColor="#082B52"
+        android:textStyle="bold"
+        android:textSize="22sp"
+        android:fontFamily="@font/cairo_bold"
+        android:paddingBottom="12dp" />
+
+    <LinearLayout
+        android:id="@+id/more_bot"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:background="?attr/selectableItemBackground">
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@drawable/ic_nav_bot"
+            android:contentDescription="البوت" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="البوت"
+            android:textColor="#082B52"
+            android:textStyle="bold"
+            android:textSize="18sp"
+            android:fontFamily="@font/cairo_bold"
+            android:paddingStart="14dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/more_contact"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:background="?attr/selectableItemBackground">
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@drawable/ic_nav_contact"
+            android:contentDescription="التواصل" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="التواصل"
+            android:textColor="#082B52"
+            android:textStyle="bold"
+            android:textSize="18sp"
+            android:fontFamily="@font/cairo_bold"
+            android:paddingStart="14dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/more_settings"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:background="?attr/selectableItemBackground">
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@drawable/ic_nav_settings"
+            android:contentDescription="الإعدادات" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="الإعدادات"
+            android:textColor="#082B52"
+            android:textStyle="bold"
+            android:textSize="18sp"
+            android:fontFamily="@font/cairo_bold"
+            android:paddingStart="14dp" />
+    </LinearLayout>
+</LinearLayout>
