@@ -111,6 +111,9 @@ interface BorgRepository {
 }
 
 private const val SESSION_USER_ID_KEY = "session_user_id"
+private const val AUTH_ACCESS_TOKEN_KEY = "auth_access_token"
+private const val AUTH_REFRESH_TOKEN_KEY = "auth_refresh_token"
+private const val AUTH_TENANT_ID_KEY = "auth_tenant_id"
 
 class OfflineFirstBorgRepository(
     private val db: BorgDatabase,
@@ -163,12 +166,42 @@ class OfflineFirstBorgRepository(
         if (cleanUsername.isBlank() || passcode.isBlank()) return null
 
         val passcodeHash = SecurityHasher.hashPasscode(passcode)
-        var user = db.userDao().findByUsername(cleanUsername)
 
+        // المرحلة الجديدة: تسجيل الدخول عبر Supabase Auth أولاً.
+        val authUser = runCatching {
+            val session = syncService.signInWithPassword(cleanUsername, passcode)
+            val profile = syncService.fetchProfile(session.accessToken, session.userId)
+                ?: error("لم يتم العثور على ملف صلاحيات المستخدم في user_profiles")
+            if (!profile.active) error("هذا المستخدم غير مفعل")
+
+            val entity = UserEntity(
+                id = session.userId,
+                tenantId = profile.tenantId,
+                username = session.email.ifBlank { cleanUsername },
+                displayName = profile.displayName.ifBlank { session.email.ifBlank { cleanUsername } },
+                role = if (profile.role == UserRole.ADMIN.name) UserRole.ADMIN.name else UserRole.PHARMACIST.name,
+                passcodeHash = passcodeHash,
+                mustChangePasscode = profile.mustChangePassword,
+                active = true,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = com.borgpharmacy.data.local.SyncStatus.SYNCED.name,
+                isDeleted = false,
+            )
+            db.userDao().upsert(entity)
+            saveAuthSession(entity.id, session.accessToken, session.refreshToken, profile.tenantId)
+            entity
+        }.onFailure { throwable ->
+            Log.w("BorgLogin", "Supabase Auth login failed; falling back to legacy login", throwable)
+        }.getOrNull()
+
+        if (authUser != null) return authUser.toDomain()
+
+        // احتياطي مؤقت حتى يتم اكتمال نقل كل الأجهزة إلى Supabase Auth.
+        var user = db.userDao().findByUsername(cleanUsername)
         if (user == null || !SecurityHasher.verify(passcode, user.passcodeHash)) {
-            // المسار الاحترافي للهاتف الجديد: تحقق مباشر من السحابة عبر RPC بدون انتظار مزامنة كاملة.
             val remoteUser = runCatching { syncService.loginUser(cleanUsername, passcodeHash) }
-                .onFailure { throwable -> Log.w("BorgLogin", "Cloud login check failed; falling back to sync", throwable) }
+                .onFailure { throwable -> Log.w("BorgLogin", "Legacy cloud login check failed; falling back to full sync", throwable) }
                 .getOrNull()
             if (remoteUser != null) {
                 db.userDao().upsert(remoteUser)
@@ -193,10 +226,20 @@ class OfflineFirstBorgRepository(
 
     override suspend fun clearSavedSession() {
         db.appSettingsDao().set(AppSettingEntity(SESSION_USER_ID_KEY, ""))
+        db.appSettingsDao().set(AppSettingEntity(AUTH_ACCESS_TOKEN_KEY, ""))
+        db.appSettingsDao().set(AppSettingEntity(AUTH_REFRESH_TOKEN_KEY, ""))
+        db.appSettingsDao().set(AppSettingEntity(AUTH_TENANT_ID_KEY, ""))
     }
 
     private suspend fun saveSession(userId: String) {
         db.appSettingsDao().set(AppSettingEntity(SESSION_USER_ID_KEY, userId))
+    }
+
+    private suspend fun saveAuthSession(userId: String, accessToken: String, refreshToken: String, tenantId: String) {
+        saveSession(userId)
+        db.appSettingsDao().set(AppSettingEntity(AUTH_ACCESS_TOKEN_KEY, accessToken))
+        db.appSettingsDao().set(AppSettingEntity(AUTH_REFRESH_TOKEN_KEY, refreshToken))
+        db.appSettingsDao().set(AppSettingEntity(AUTH_TENANT_ID_KEY, tenantId))
     }
 
     override suspend fun changePasscode(userId: String, newPasscode: String) {

@@ -493,9 +493,10 @@ begin
 
   for item in select value from jsonb_array_elements(p_rows) loop
     insert into public.users (
-      id, username, display_name, role, passcode_hash, must_change_passcode, active, created_at, updated_at
+      id, tenant_id, username, display_name, role, passcode_hash, must_change_passcode, active, created_at, updated_at, sync_status, is_deleted
     ) values (
       (item->>'id')::uuid,
+      coalesce(nullif(item->>'tenant_id', '')::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
       lower(trim(item->>'username')),
       coalesce(nullif(trim(item->>'display_name'), ''), trim(item->>'username')),
       case when item->>'role' = 'ADMIN' then 'ADMIN' else 'PHARMACIST' end,
@@ -503,15 +504,20 @@ begin
       coalesce((item->>'must_change_passcode')::boolean, false),
       coalesce((item->>'active')::boolean, true),
       coalesce((item->>'created_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
-      coalesce((item->>'updated_at')::bigint, (extract(epoch from now()) * 1000)::bigint)
+      coalesce((item->>'updated_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      'SYNCED',
+      coalesce((item->>'is_deleted')::boolean, false)
     )
     on conflict (username) do update set
+      tenant_id = excluded.tenant_id,
       display_name = excluded.display_name,
       role = excluded.role,
       passcode_hash = excluded.passcode_hash,
       must_change_passcode = excluded.must_change_passcode,
       active = excluded.active,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      sync_status = 'SYNCED',
+      is_deleted = excluded.is_deleted
     where public.users.updated_at <= excluded.updated_at;
   end loop;
 end;

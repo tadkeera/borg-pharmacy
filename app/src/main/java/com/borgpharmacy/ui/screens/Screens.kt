@@ -472,7 +472,7 @@ private fun LockScreen(
                         colors = borgTextFieldColors(),
                         value = username,
                         onValueChange = { username = it },
-                        label = { Text("اسم المستخدم") },
+                        label = { Text("البريد الإلكتروني") },
                         leadingIcon = { Icon(Icons.Default.Lock, null) },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
@@ -482,7 +482,7 @@ private fun LockScreen(
                         colors = borgTextFieldColors(),
                         value = passcode,
                         onValueChange = { passcode = it },
-                        label = { Text("كود التفعيل / كلمة المرور") },
+                        label = { Text("كلمة المرور") },
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -2102,7 +2102,7 @@ private fun UserManagementCard(state: BorgUiState, onCreateUser: (String, String
                 colors = borgTextFieldColors(),
                 value = username,
                 onValueChange = { username = it },
-                label = { Text("اسم المستخدم") },
+                label = { Text("البريد الإلكتروني") },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             )

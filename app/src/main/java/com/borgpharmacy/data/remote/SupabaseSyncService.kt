@@ -34,6 +34,40 @@ class SupabaseSyncService(
 ) {
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
+    suspend fun signInWithPassword(email: String, password: String): SupabaseAuthSession = withContext(Dispatchers.IO) {
+        val response = postAuth(
+            path = "token?grant_type=password",
+            body = buildJsonObject {
+                put("email", email.trim().lowercase())
+                put("password", password)
+            }
+        )
+        json.decodeFromString<AuthTokenResponseDto>(response).toDomain()
+    }
+
+    suspend fun fetchProfile(accessToken: String, userId: String): UserProfileRemoteDto? = withContext(Dispatchers.IO) {
+        val encodedUserId = java.net.URLEncoder.encode(userId, "UTF-8")
+        val connection = (URL("${BuildConfig.SUPABASE_URL}/rest/v1/user_profiles?select=*&user_id=eq.$encodedUserId&limit=1").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30_000
+            readTimeout = 30_000
+            setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        try {
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                throw IllegalStateException("Supabase profile fetch failed with HTTP $code: $response")
+            }
+            json.decodeFromString<List<UserProfileRemoteDto>>(response).firstOrNull()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     suspend fun pushCompanies(companies: List<CompanyEntity>) {
         if (companies.isEmpty()) return
         postSyncRpc("borg_sync_companies", json.encodeToJsonElement(companies.map { it.toRemote() }))
@@ -95,6 +129,31 @@ class SupabaseSyncService(
         )
     }
 
+    private suspend fun postAuth(path: String, body: JsonObject): String = withContext(Dispatchers.IO) {
+        val connection = (URL("${BuildConfig.SUPABASE_URL}/auth/v1/$path").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 30_000
+            readTimeout = 30_000
+            doOutput = true
+            setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+
+        try {
+            val bytes = json.encodeToString(JsonObject.serializer(), body).toByteArray(Charsets.UTF_8)
+            connection.outputStream.use { it.write(bytes) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                throw IllegalStateException("Supabase Auth request failed with HTTP $code: $response")
+            }
+            response
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private suspend fun postRpc(functionName: String, body: JsonObject, preferReturnMinimal: Boolean): String = withContext(Dispatchers.IO) {
         val connection = (URL("${BuildConfig.SUPABASE_URL}/rest/v1/rpc/$functionName").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -122,6 +181,46 @@ class SupabaseSyncService(
         }
     }
 }
+
+data class SupabaseAuthSession(
+    val accessToken: String,
+    val refreshToken: String,
+    val expiresIn: Long,
+    val userId: String,
+    val email: String,
+)
+
+@Serializable
+data class AuthTokenResponseDto(
+    @SerialName("access_token") val accessToken: String,
+    @SerialName("refresh_token") val refreshToken: String,
+    @SerialName("expires_in") val expiresIn: Long = 0,
+    val user: AuthUserDto,
+) {
+    fun toDomain(): SupabaseAuthSession = SupabaseAuthSession(
+        accessToken = accessToken,
+        refreshToken = refreshToken,
+        expiresIn = expiresIn,
+        userId = user.id,
+        email = user.email.orEmpty(),
+    )
+}
+
+@Serializable
+data class AuthUserDto(
+    val id: String,
+    val email: String? = null,
+)
+
+@Serializable
+data class UserProfileRemoteDto(
+    @SerialName("user_id") val userId: String,
+    @SerialName("tenant_id") val tenantId: String,
+    @SerialName("display_name") val displayName: String = "",
+    val role: String = "PHARMACIST",
+    val active: Boolean = true,
+    @SerialName("must_change_password") val mustChangePassword: Boolean = false,
+)
 
 data class RemoteSnapshot(
     val companies: List<CompanyEntity>,
