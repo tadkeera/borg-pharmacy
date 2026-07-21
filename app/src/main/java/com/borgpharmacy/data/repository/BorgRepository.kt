@@ -192,19 +192,27 @@ class OfflineFirstBorgRepository(
     override suspend fun changePasscode(userId: String, newPasscode: String) {
         db.userDao().changePasscode(userId, SecurityHasher.hashPasscode(newPasscode))
         saveSession(userId)
+        db.userDao().getById(userId)?.let { user ->
+            runCatching { syncService.pushUsers(listOf(user)) }
+                .onFailure { throwable -> Log.w("BorgSync", "Immediate passcode sync failed", throwable) }
+        }
         afterMutation("passcode")
     }
 
     override suspend fun createUser(username: String, displayName: String, role: UserRole, passcode: String) {
-        db.userDao().upsert(
-            UserEntity(
-                username = username.trim(),
-                displayName = displayName.trim().ifBlank { username.trim() },
-                role = role.name,
-                passcodeHash = SecurityHasher.hashPasscode(passcode),
-                mustChangePasscode = false,
-            )
+        val cleanUsername = username.trim().lowercase()
+        if (cleanUsername.isBlank()) return
+        val entity = UserEntity(
+            username = cleanUsername,
+            displayName = displayName.trim().ifBlank { cleanUsername },
+            role = role.name,
+            passcodeHash = SecurityHasher.hashPasscode(passcode),
+            mustChangePasscode = false,
         )
+        db.userDao().upsert(entity)
+        // رفع فوري للمستخدم الجديد حتى يظهر في جدول users وفي أي هاتف آخر بدون انتظار المزامنة الدورية.
+        runCatching { syncService.pushUsers(listOf(entity)) }
+            .onFailure { throwable -> Log.w("BorgSync", "Immediate user sync failed", throwable) }
         afterMutation("user")
     }
 

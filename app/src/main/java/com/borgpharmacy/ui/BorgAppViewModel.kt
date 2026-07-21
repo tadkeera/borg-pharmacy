@@ -37,19 +37,32 @@ class BorgAppViewModel(
 
     init {
         viewModelScope.launch {
-            val start = repository.initialize()
-            val savedUser = repository.restoreSavedSession()
-            _state.update {
-                it.copy(
-                    initialized = true,
-                    cycleStart = start,
-                    cycleInfo = cycleCalculator.currentCycle(start),
-                    currentUser = savedUser,
-                )
+            try {
+                val start = repository.initialize()
+                val savedUser = repository.restoreSavedSession()
+                _state.update {
+                    it.copy(
+                        initialized = true,
+                        cycleStart = start,
+                        cycleInfo = cycleCalculator.currentCycle(start),
+                        currentUser = savedUser,
+                    )
+                }
+                refreshReports()
+                refreshBotSettings()
+                refreshRepresentativeInquiries()
+            } catch (t: Throwable) {
+                Log.e("BorgInit", "Application initialization failed", t)
+                val start = LocalDate.now()
+                _state.update {
+                    it.copy(
+                        initialized = true,
+                        cycleStart = start,
+                        cycleInfo = cycleCalculator.currentCycle(start),
+                        loginError = "تعذر تهيئة المزامنة، لكن يمكنك محاولة الدخول ثم المزامنة لاحقاً"
+                    )
+                }
             }
-            refreshReports()
-            refreshBotSettings()
-            refreshRepresentativeInquiries()
         }
         viewModelScope.launch { repository.observeCompanies().collect { value -> _state.update { it.copy(companies = value) } } }
         viewModelScope.launch { repository.observeRepresentatives().collect { value -> _state.update { it.copy(representatives = value) } } }

@@ -316,6 +316,23 @@ create table if not exists public.users (
 );
 
 create index if not exists idx_users_active_username on public.users (lower(username)) where active = true;
+
+-- Seed آمن حتى لا يبقى جدول users فارغاً بعد تنفيذ SQL لأول مرة.
+-- سيُحدّث التطبيق هذا السجل عند تغيير كلمة مرور المدير أو إنشاء مستخدمين جدد.
+insert into public.users (id, username, display_name, role, passcode_hash, must_change_passcode, active, created_at, updated_at)
+values (
+  '00000000-0000-0000-0000-000000000001',
+  'admin',
+  'Master Admin',
+  'ADMIN',
+  '116bc4509ee2ef4433e9eaa983461923320adef0ed493e91979bb447a4a88f36',
+  true,
+  true,
+  (extract(epoch from now()) * 1000)::bigint,
+  (extract(epoch from now()) * 1000)::bigint
+)
+on conflict (username) do nothing;
+
 alter table public.users enable row level security;
 revoke select, insert, update, delete on table public.users from anon;
 
