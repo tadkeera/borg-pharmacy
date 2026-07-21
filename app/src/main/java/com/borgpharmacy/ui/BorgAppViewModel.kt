@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -56,6 +57,14 @@ class BorgAppViewModel(
         viewModelScope.launch { repository.observePrintCounts().collect { value -> _state.update { it.copy(printCounts = value) } } }
         viewModelScope.launch { repository.observeUsers().collect { value -> _state.update { it.copy(users = value) } } }
         viewModelScope.launch { repository.observeTierCounts().collect { value -> _state.update { it.copy(tierCounts = value) } } }
+        viewModelScope.launch {
+            // مزامنة دورية خفيفة حتى تظهر المندوبون المسجلون من صفحة الويب داخل التطبيق بدون انتظار إعادة التشغيل.
+            while (true) {
+                delay(120_000)
+                repository.syncNow()
+                refreshRepresentativeInquiries()
+            }
+        }
     }
 
     fun login(username: String, passcode: String) = viewModelScope.launch {

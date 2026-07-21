@@ -407,40 +407,61 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun syncNow() {
-        try {
-            val companies = db.companyDao().dirty()
-            val reps = db.representativeDao().dirty()
-            val visits = db.visitDao().dirty()
+        val companies = db.companyDao().dirty()
+        val reps = db.representativeDao().dirty()
+        val visits = db.visitDao().dirty()
+
+        // مهم: لا نوقف السحب من Supabase إذا فشلت إحدى عمليات الدفع.
+        // في الإصدارات السابقة كان فشل دفع حذف مندوب واحد يمنع Pull بالكامل، لذلك لا تظهر المندوبون المسجلون من صفحة الويب داخل التطبيق.
+        runCatching {
             syncService.pushCompanies(companies)
-            syncService.pushRepresentatives(reps)
-            syncService.pushVisits(visits)
             if (companies.isNotEmpty()) db.companyDao().markClean(companies.map { it.id })
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Company push failed; continuing with pull", throwable)
+        }
+
+        runCatching {
+            syncService.pushRepresentatives(reps)
             if (reps.isNotEmpty()) db.representativeDao().markClean(reps.map { it.id })
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Representative push failed; continuing with pull", throwable)
+        }
+
+        runCatching {
+            syncService.pushVisits(visits)
             if (visits.isNotEmpty()) db.visitDao().markClean(visits.map { it.id })
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Visit push failed; continuing with pull", throwable)
+        }
 
-            val remote = syncService.pullAll()
-            db.withTransaction {
-                if (remote.companies.isNotEmpty()) {
-                    val mergedCompanies = remote.companies.map { remoteCompany ->
-                        val local = db.companyDao().getById(remoteCompany.id)
-                        remoteCompany.copy(
-                            baseDayIndex = remoteCompany.baseDayIndex ?: local?.baseDayIndex,
-                            baseShift = remoteCompany.baseShift ?: local?.baseShift,
-                        )
-                    }
-                    db.companyDao().upsertAll(mergedCompanies)
+        val remote = runCatching { syncService.pullAll() }
+            .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed; local cache remains authoritative", throwable) }
+            .getOrNull()
+            ?: return
+
+        db.withTransaction {
+            if (remote.companies.isNotEmpty()) {
+                val mergedCompanies = remote.companies.map { remoteCompany ->
+                    val local = db.companyDao().getById(remoteCompany.id)
+                    remoteCompany.copy(
+                        baseDayIndex = remoteCompany.baseDayIndex ?: local?.baseDayIndex,
+                        baseShift = remoteCompany.baseShift ?: local?.baseShift,
+                    )
                 }
-                if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
-                if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
+                db.companyDao().upsertAll(mergedCompanies)
             }
+            if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
+            if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
+        }
 
-            if (ensureCurrentCycleSchedule()) {
-                val generatedVisits = db.visitDao().dirty()
+        if (ensureCurrentCycleSchedule()) {
+            val generatedVisits = db.visitDao().dirty()
+            runCatching {
                 syncService.pushVisits(generatedVisits)
                 if (generatedVisits.isNotEmpty()) db.visitDao().markClean(generatedVisits.map { it.id })
+            }.onFailure { throwable ->
+                Log.w("BorgSync", "Generated visits push failed", throwable)
             }
-        } catch (throwable: Throwable) {
-            Log.w("BorgSync", "Cloud sync skipped/failed; local cache remains authoritative", throwable)
         }
     }
 

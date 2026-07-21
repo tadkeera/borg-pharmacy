@@ -209,6 +209,16 @@ begin
 end;
 $$;
 
+
+-- فهارس تساعد على كشف التكرار بسرعة في صفحة الويب والتطبيق.
+create index if not exists idx_representatives_active_phone_normalized
+on public.representatives (public.web_normalize_phone(phone))
+where deleted_at is null;
+
+create index if not exists idx_representatives_active_name_normalized
+on public.representatives (public.web_normalize_representative_name(name))
+where deleted_at is null;
+
 create table if not exists public.representative_portal_logs (
   id uuid primary key default gen_random_uuid(),
   representative_id uuid not null references public.representatives(id) on delete cascade,
@@ -245,6 +255,38 @@ on public.representative_portal_logs
 for select
 to anon
 using (true);
+
+-- توافق ضروري مع تطبيق Android الحالي:
+-- التطبيق لا يستخدم Supabase Auth حتى الآن، بل يزامن الشركات/المندوبين/الزيارات مباشرة بمفتاح anon.
+-- في النسخة السابقة تم إغلاق كتابة anon بالكامل، ففشل مزامنة حذف المندوبين، وبقيت أرقام محذوفة نشطة في السحابة.
+-- لذلك نعيد صلاحيات الكتابة لهذه الجداول لتعمل مزامنة التطبيق الحالية، بينما صفحة الويب نفسها تحفظ عبر دالة SECURITY DEFINER فقط.
+grant insert, update, delete on table public.companies to anon;
+grant insert, update, delete on table public.representatives to anon;
+grant insert, update, delete on table public.visits to anon;
+
+drop policy if exists "borg_companies_write" on public.companies;
+create policy "borg_companies_write"
+on public.companies
+for all
+to anon
+using (true)
+with check (true);
+
+drop policy if exists "borg_reps_write" on public.representatives;
+create policy "borg_reps_write"
+on public.representatives
+for all
+to anon
+using (true)
+with check (true);
+
+drop policy if exists "borg_visits_write" on public.visits;
+create policy "borg_visits_write"
+on public.visits
+for all
+to anon
+using (true)
+with check (true);
 
 create or replace view public.representative_portal_report
 with (security_invoker = true)
@@ -325,6 +367,7 @@ begin
   from public.representatives r
   join public.companies c on c.id = r.company_id
   where r.deleted_at is null
+    and c.deleted_at is null
     and public.web_normalize_phone(r.phone) = v_phone
   order by r.updated_at desc
   limit 1;
@@ -340,6 +383,7 @@ begin
   from public.representatives r
   join public.companies c on c.id = r.company_id
   where r.deleted_at is null
+    and c.deleted_at is null
     and public.web_normalize_representative_name(r.name) = public.web_normalize_representative_name(v_name)
   order by r.updated_at desc
   limit 1;
