@@ -159,14 +159,24 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun login(username: String, passcode: String): UserAccount? {
-        val cleanUsername = username.trim()
+        val cleanUsername = username.trim().lowercase()
         if (cleanUsername.isBlank() || passcode.isBlank()) return null
 
+        val passcodeHash = SecurityHasher.hashPasscode(passcode)
         var user = db.userDao().findByUsername(cleanUsername)
+
         if (user == null || !SecurityHasher.verify(passcode, user.passcodeHash)) {
-            // في هاتف جديد قد لا تكون حسابات المستخدمين قد سُحبت بعد من Supabase؛ نزامن ثم نعيد المحاولة مرة واحدة.
-            syncNow()
-            user = db.userDao().findByUsername(cleanUsername)
+            // المسار الاحترافي للهاتف الجديد: تحقق مباشر من السحابة عبر RPC بدون انتظار مزامنة كاملة.
+            val remoteUser = runCatching { syncService.loginUser(cleanUsername, passcodeHash) }
+                .onFailure { throwable -> Log.w("BorgLogin", "Cloud login check failed; falling back to sync", throwable) }
+                .getOrNull()
+            if (remoteUser != null) {
+                db.userDao().upsert(remoteUser)
+                user = remoteUser
+            } else {
+                syncNow()
+                user = db.userDao().findByUsername(cleanUsername)
+            }
         }
 
         val validUser = user ?: return null
@@ -428,7 +438,7 @@ class OfflineFirstBorgRepository(
         val companies = db.companyDao().dirty()
         val reps = db.representativeDao().dirty()
         val visits = db.visitDao().dirty()
-        val users = db.userDao().listAll().filterNot { it.isUnchangedSeedAdmin() }
+        val users = db.userDao().listAll()
 
         // مهم: لا نوقف السحب من Supabase إذا فشلت إحدى عمليات الدفع.
         // في الإصدارات السابقة كان فشل دفع حذف مندوب واحد يمنع Pull بالكامل، لذلك لا تظهر المندوبون المسجلون من صفحة الويب داخل التطبيق.

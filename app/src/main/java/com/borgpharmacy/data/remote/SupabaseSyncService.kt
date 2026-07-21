@@ -54,6 +54,19 @@ class SupabaseSyncService(
         postSyncRpc("borg_sync_users", json.encodeToJsonElement(users.map { it.toRemote() }))
     }
 
+    suspend fun loginUser(username: String, passcodeHash: String): UserEntity? {
+        val response = postRpc(
+            functionName = "borg_login_user",
+            body = buildJsonObject {
+                put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+                put("p_username", username.trim().lowercase())
+                put("p_passcode_hash", passcodeHash)
+            },
+            preferReturnMinimal = false,
+        )
+        return json.decodeFromString<List<UserRemoteDto>>(response).firstOrNull()?.toEntity()
+    }
+
     suspend fun pullAll(): RemoteSnapshot {
         val companies = client.from("companies").select().decodeList<CompanyRemoteDto>().map { it.toEntity() }
         val reps = client.from("representatives").select().decodeList<RepresentativeRemoteDto>().map { it.toEntity() }

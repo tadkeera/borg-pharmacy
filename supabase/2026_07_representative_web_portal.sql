@@ -545,11 +545,43 @@ begin
 end;
 $$;
 
+create or replace function public.borg_login_user(p_token text, p_username text, p_passcode_hash text)
+returns table (
+  id uuid,
+  username text,
+  display_name text,
+  role text,
+  passcode_hash text,
+  must_change_passcode boolean,
+  active boolean,
+  created_at bigint,
+  updated_at bigint
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  return query
+  select u.id, u.username, u.display_name, u.role, u.passcode_hash, u.must_change_passcode, u.active, u.created_at, u.updated_at
+  from public.users u
+  where lower(u.username) = lower(trim(p_username))
+    and u.passcode_hash = p_passcode_hash
+    and u.active = true
+  limit 1;
+end;
+$$;
+
 grant execute on function public.borg_sync_companies(text, jsonb) to anon;
 grant execute on function public.borg_sync_representatives(text, jsonb) to anon;
 grant execute on function public.borg_sync_visits(text, jsonb) to anon;
 grant execute on function public.borg_sync_users(text, jsonb) to anon;
 grant execute on function public.borg_pull_users(text) to anon;
+grant execute on function public.borg_login_user(text, text, text) to anon;
 
 create or replace view public.representative_portal_report
 with (security_invoker = true)

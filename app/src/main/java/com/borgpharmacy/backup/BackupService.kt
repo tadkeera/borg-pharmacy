@@ -20,8 +20,15 @@ class BackupService(
 
     @Suppress("DEPRECATION")
     fun backupDirectory(): File {
-        val root = Environment.getExternalStorageDirectory()
-        return File(root, "BORG PHARMACY/BACKUP").apply { mkdirs() }
+        // على بعض أجهزة Samsung/Android الحديثة قد يمنع النظام الكتابة المباشرة في جذر الذاكرة الخارجية.
+        // لذلك نحاول المسار القديم المتوافق، وإذا فشل نستخدم مساراً آمناً داخل مساحة التطبيق الخارجية.
+        val legacyDir = runCatching {
+            File(Environment.getExternalStorageDirectory(), "BORG PHARMACY/BACKUP").apply { mkdirs() }
+        }.getOrNull()
+        if (legacyDir != null && (legacyDir.exists() || legacyDir.mkdirs())) return legacyDir
+
+        val safeRoot = context.getExternalFilesDir(null) ?: context.filesDir
+        return File(safeRoot, "BORG PHARMACY/BACKUP").apply { mkdirs() }
     }
 
     suspend fun ensureDirectories(): File = withContext(Dispatchers.IO) { backupDirectory() }
