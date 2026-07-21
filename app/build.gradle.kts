@@ -14,6 +14,10 @@ val keystoreProperties = Properties().apply {
     }
 }
 val hasReleaseSigning = keystorePropertiesFile.exists()
+val supabaseSyncTokenProvider = providers.gradleProperty("SUPABASE_SYNC_TOKEN")
+    .orElse(providers.environmentVariable("SUPABASE_SYNC_TOKEN"))
+    .orElse("debug-local-sync-token-change-me")
+fun escapeBuildConfigString(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
     namespace = "com.borgpharmacy"
@@ -23,14 +27,15 @@ android {
         applicationId = "com.borgpharmacy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 34
-        versionName = "1.0.33"
+        versionCode = 35
+        versionName = "1.0.34"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
         buildConfigField("String", "SUPABASE_URL", "\"https://dtkldxmfkhipdgiltzjl.supabase.co\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0a2xkeG1ma2hpcGRnaWx0empsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNzY3NjIsImV4cCI6MjA5ODg1Mjc2Mn0.jXEUggNeO_tvt2lm7BRRbzm4p1eI-WZRvojLVdKn2fg\"")
+        buildConfigField("String", "SUPABASE_SYNC_TOKEN", "\"${escapeBuildConfigString(supabaseSyncTokenProvider.get())}\"")
     }
 
     signingConfigs {

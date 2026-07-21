@@ -141,6 +141,29 @@ for select
 to anon
 using (deleted_at is null);
 
+-- قراءة مزامنة التطبيق: يحتاج تطبيق Android إلى قراءة السجلات النشطة والمحذوفة ناعماً حتى تنتقل عمليات الحذف بين الأجهزة.
+-- صفحة الويب ما زالت تعرض النشط فقط لأنها تستخدم deleted_at is null في الاستعلامات والـ views.
+drop policy if exists "borg_app_companies_read_sync" on public.companies;
+create policy "borg_app_companies_read_sync"
+on public.companies
+for select
+to anon
+using (true);
+
+drop policy if exists "borg_app_reps_read_sync" on public.representatives;
+create policy "borg_app_reps_read_sync"
+on public.representatives
+for select
+to anon
+using (true);
+
+drop policy if exists "borg_app_visits_read_sync" on public.visits;
+create policy "borg_app_visits_read_sync"
+on public.visits
+for select
+to anon
+using (true);
+
 -- إذا تم تفعيل Supabase Auth لاحقاً لتطبيق الإدارة، يمكن للمستخدمين authenticated الكتابة.
 -- هذه السياسات لا تعطي صلاحية للزوار anon، بل فقط لحسابات authenticated.
 drop policy if exists "borg_companies_authenticated_write" on public.companies;
@@ -256,37 +279,167 @@ for select
 to anon
 using (true);
 
--- توافق ضروري مع تطبيق Android الحالي:
--- التطبيق لا يستخدم Supabase Auth حتى الآن، بل يزامن الشركات/المندوبين/الزيارات مباشرة بمفتاح anon.
--- في النسخة السابقة تم إغلاق كتابة anon بالكامل، ففشل مزامنة حذف المندوبين، وبقيت أرقام محذوفة نشطة في السحابة.
--- لذلك نعيد صلاحيات الكتابة لهذه الجداول لتعمل مزامنة التطبيق الحالية، بينما صفحة الويب نفسها تحفظ عبر دالة SECURITY DEFINER فقط.
-grant insert, update, delete on table public.companies to anon;
-grant insert, update, delete on table public.representatives to anon;
-grant insert, update, delete on table public.visits to anon;
+-- قفل الكتابة المباشرة من مفتاح anon على الجداول الأساسية.
+-- تطبيق Android يكتب الآن عبر دوال RPC محددة ومحمية بتوكن مزامنة خاص، وليس عبر INSERT/UPDATE مباشر على الجداول.
+revoke insert, update, delete on table public.companies from anon;
+revoke insert, update, delete on table public.representatives from anon;
+revoke insert, update, delete on table public.visits from anon;
+revoke insert, update, delete on table public.representative_portal_logs from anon;
 
 drop policy if exists "borg_companies_write" on public.companies;
-create policy "borg_companies_write"
-on public.companies
-for all
-to anon
-using (true)
-with check (true);
-
 drop policy if exists "borg_reps_write" on public.representatives;
-create policy "borg_reps_write"
-on public.representatives
-for all
-to anon
-using (true)
-with check (true);
-
 drop policy if exists "borg_visits_write" on public.visits;
-create policy "borg_visits_write"
-on public.visits
-for all
-to anon
-using (true)
-with check (true);
+
+-- تحقق توكن مزامنة تطبيق Android.
+-- لا يحتوي ملف SQL على التوكن الخام، بل SHA-256 فقط. التوكن الخام محفوظ كـ GitHub Secret ويُحقن داخل APK وقت الإصدار.
+create or replace function public.borg_sync_token_valid(p_token text)
+returns boolean
+language sql
+stable
+as $$
+  select encode(digest(coalesce(p_token, ''), 'sha256'), 'hex') = '642a1aa19257a2adbe59dc61b12e2c788f0c5f0c625876691822d7b16320bb44';
+$$;
+
+revoke execute on function public.borg_sync_token_valid(text) from public;
+
+create or replace function public.borg_sync_companies(p_token text, p_rows jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item jsonb;
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  if coalesce(jsonb_typeof(p_rows), '') <> 'array' then
+    raise exception 'p_rows must be a json array';
+  end if;
+
+  for item in select value from jsonb_array_elements(p_rows) loop
+    insert into public.companies (
+      id, name, tier, base_day_index, base_shift, created_at, updated_at, deleted_at
+    ) values (
+      (item->>'id')::uuid,
+      nullif(trim(item->>'name'), ''),
+      coalesce(nullif(item->>'tier', ''), 'UNRATED'),
+      case when item ? 'base_day_index' and item->>'base_day_index' is not null then (item->>'base_day_index')::int else null end,
+      nullif(item->>'base_shift', ''),
+      coalesce((item->>'created_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      coalesce((item->>'updated_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      case when item ? 'deleted_at' and item->>'deleted_at' is not null then (item->>'deleted_at')::bigint else null end
+    )
+    on conflict (id) do update set
+      name = excluded.name,
+      tier = excluded.tier,
+      base_day_index = excluded.base_day_index,
+      base_shift = excluded.base_shift,
+      updated_at = excluded.updated_at,
+      deleted_at = excluded.deleted_at
+    where public.companies.updated_at <= excluded.updated_at
+       or public.companies.deleted_at is distinct from excluded.deleted_at;
+  end loop;
+end;
+$$;
+
+create or replace function public.borg_sync_representatives(p_token text, p_rows jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item jsonb;
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  if coalesce(jsonb_typeof(p_rows), '') <> 'array' then
+    raise exception 'p_rows must be a json array';
+  end if;
+
+  for item in select value from jsonb_array_elements(p_rows) loop
+    insert into public.representatives (
+      id, company_id, name, phone, created_at, updated_at, deleted_at
+    ) values (
+      (item->>'id')::uuid,
+      (item->>'company_id')::uuid,
+      nullif(trim(item->>'name'), ''),
+      public.web_normalize_phone(item->>'phone'),
+      coalesce((item->>'created_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      coalesce((item->>'updated_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      case when item ? 'deleted_at' and item->>'deleted_at' is not null then (item->>'deleted_at')::bigint else null end
+    )
+    on conflict (id) do update set
+      company_id = excluded.company_id,
+      name = excluded.name,
+      phone = excluded.phone,
+      updated_at = excluded.updated_at,
+      deleted_at = excluded.deleted_at
+    where public.representatives.updated_at <= excluded.updated_at
+       or public.representatives.deleted_at is distinct from excluded.deleted_at;
+  end loop;
+end;
+$$;
+
+create or replace function public.borg_sync_visits(p_token text, p_rows jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item jsonb;
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  if coalesce(jsonb_typeof(p_rows), '') <> 'array' then
+    raise exception 'p_rows must be a json array';
+  end if;
+
+  for item in select value from jsonb_array_elements(p_rows) loop
+    insert into public.visits (
+      id, company_id, cycle_start_epoch_day, day_of_cycle, week_of_cycle, date_epoch_day, shift, slot_index, status, created_at, updated_at, deleted_at
+    ) values (
+      (item->>'id')::uuid,
+      (item->>'company_id')::uuid,
+      (item->>'cycle_start_epoch_day')::bigint,
+      (item->>'day_of_cycle')::int,
+      (item->>'week_of_cycle')::int,
+      (item->>'date_epoch_day')::bigint,
+      item->>'shift',
+      (item->>'slot_index')::int,
+      coalesce(nullif(item->>'status', ''), 'SCHEDULED'),
+      coalesce((item->>'created_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      coalesce((item->>'updated_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      case when item ? 'deleted_at' and item->>'deleted_at' is not null then (item->>'deleted_at')::bigint else null end
+    )
+    on conflict (id) do update set
+      company_id = excluded.company_id,
+      cycle_start_epoch_day = excluded.cycle_start_epoch_day,
+      day_of_cycle = excluded.day_of_cycle,
+      week_of_cycle = excluded.week_of_cycle,
+      date_epoch_day = excluded.date_epoch_day,
+      shift = excluded.shift,
+      slot_index = excluded.slot_index,
+      status = excluded.status,
+      updated_at = excluded.updated_at,
+      deleted_at = excluded.deleted_at
+    where public.visits.updated_at <= excluded.updated_at
+       or public.visits.deleted_at is distinct from excluded.deleted_at;
+  end loop;
+end;
+$$;
+
+grant execute on function public.borg_sync_companies(text, jsonb) to anon;
+grant execute on function public.borg_sync_representatives(text, jsonb) to anon;
+grant execute on function public.borg_sync_visits(text, jsonb) to anon;
 
 create or replace view public.representative_portal_report
 with (security_invoker = true)
