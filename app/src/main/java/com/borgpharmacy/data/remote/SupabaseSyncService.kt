@@ -101,6 +101,26 @@ class SupabaseSyncService(
         return json.decodeFromString<List<UserRemoteDto>>(response).firstOrNull()?.toEntity()
     }
 
+    suspend fun adminCreateAuthUser(
+        accessToken: String,
+        email: String,
+        password: String,
+        displayName: String,
+        role: String,
+    ): CreatedAuthUserDto = withContext(Dispatchers.IO) {
+        val response = postFunction(
+            functionName = "admin-create-user",
+            accessToken = accessToken,
+            body = buildJsonObject {
+                put("email", email.trim().lowercase())
+                put("password", password)
+                put("displayName", displayName.trim())
+                put("role", if (role == "ADMIN") "ADMIN" else "PHARMACIST")
+            }
+        )
+        json.decodeFromString<CreatedAuthUserDto>(response)
+    }
+
     suspend fun pullAll(): RemoteSnapshot {
         val companies = client.from("companies").select().decodeList<CompanyRemoteDto>().map { it.toEntity() }
         val reps = client.from("representatives").select().decodeList<RepresentativeRemoteDto>().map { it.toEntity() }
@@ -147,6 +167,32 @@ class SupabaseSyncService(
             val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
                 throw IllegalStateException("Supabase Auth request failed with HTTP $code: $response")
+            }
+            response
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private suspend fun postFunction(functionName: String, accessToken: String, body: JsonObject): String = withContext(Dispatchers.IO) {
+        val connection = (URL("${BuildConfig.SUPABASE_URL}/functions/v1/$functionName").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 30_000
+            readTimeout = 30_000
+            doOutput = true
+            setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+
+        try {
+            val bytes = json.encodeToString(JsonObject.serializer(), body).toByteArray(Charsets.UTF_8)
+            connection.outputStream.use { it.write(bytes) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                throw IllegalStateException("Supabase Function $functionName failed with HTTP $code: $response")
             }
             response
         } finally {
@@ -220,6 +266,15 @@ data class UserProfileRemoteDto(
     val role: String = "PHARMACIST",
     val active: Boolean = true,
     @SerialName("must_change_password") val mustChangePassword: Boolean = false,
+)
+
+@Serializable
+data class CreatedAuthUserDto(
+    val id: String,
+    val email: String,
+    val displayName: String,
+    val role: String,
+    val tenantId: String,
 )
 
 data class RemoteSnapshot(

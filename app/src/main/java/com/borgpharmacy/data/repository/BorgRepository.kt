@@ -253,17 +253,55 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun createUser(username: String, displayName: String, role: UserRole, passcode: String) {
-        val cleanUsername = username.trim().lowercase()
-        if (cleanUsername.isBlank()) return
-        val entity = UserEntity(
-            username = cleanUsername,
-            displayName = displayName.trim().ifBlank { cleanUsername },
-            role = role.name,
-            passcodeHash = SecurityHasher.hashPasscode(passcode),
-            mustChangePasscode = false,
-        )
+        val cleanEmail = username.trim().lowercase()
+        if (cleanEmail.isBlank()) return
+        val cleanDisplayName = displayName.trim().ifBlank { cleanEmail }
+        val passcodeHash = SecurityHasher.hashPasscode(passcode)
+        val accessToken = db.appSettingsDao().getValue(AUTH_ACCESS_TOKEN_KEY).orEmpty()
+
+        // المرحلة الجديدة: إنشاء المستخدم في Supabase Auth عبر Edge Function آمنة يستدعيها الأدمن فقط.
+        val authCreated = if (accessToken.isNotBlank()) {
+            runCatching {
+                syncService.adminCreateAuthUser(
+                    accessToken = accessToken,
+                    email = cleanEmail,
+                    password = passcode,
+                    displayName = cleanDisplayName,
+                    role = role.name,
+                )
+            }.onFailure { throwable ->
+                Log.w("BorgAuth", "Admin Auth user creation failed; using legacy fallback", throwable)
+            }.getOrNull()
+        } else {
+            null
+        }
+
+        val entity = if (authCreated != null) {
+            UserEntity(
+                id = authCreated.id,
+                tenantId = authCreated.tenantId,
+                username = authCreated.email.trim().lowercase(),
+                displayName = authCreated.displayName.ifBlank { cleanDisplayName },
+                role = if (authCreated.role == UserRole.ADMIN.name) UserRole.ADMIN.name else UserRole.PHARMACIST.name,
+                passcodeHash = passcodeHash,
+                mustChangePasscode = false,
+                active = true,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = com.borgpharmacy.data.local.SyncStatus.SYNCED.name,
+                isDeleted = false,
+            )
+        } else {
+            UserEntity(
+                username = cleanEmail,
+                displayName = cleanDisplayName,
+                role = role.name,
+                passcodeHash = passcodeHash,
+                mustChangePasscode = false,
+            )
+        }
+
         db.userDao().upsert(entity)
-        // رفع فوري للمستخدم الجديد حتى يظهر في جدول users وفي أي هاتف آخر بدون انتظار المزامنة الدورية.
         runCatching { syncService.pushUsers(listOf(entity)) }
             .onFailure { throwable -> Log.w("BorgSync", "Immediate user sync failed", throwable) }
         afterMutation("user")

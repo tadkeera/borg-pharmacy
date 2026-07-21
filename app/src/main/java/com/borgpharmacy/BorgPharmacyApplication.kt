@@ -67,6 +67,16 @@ private val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+private val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // v1.0.38/v1.0.39 استخدم tenant افتراضياً مؤقتاً 000...000.
+        // بعد تفعيل Auth أصبح Tenant صيدلية برج الأطباء هو 000...001، لذلك ننقل البيانات المحلية إليه حتى لا تختفي الشركات والجداول بعد الدخول.
+        listOf("companies", "representatives", "visits", "print_logs", "users", "app_settings").forEach { table ->
+            db.execSQL("UPDATE $table SET tenantId = '$DEFAULT_TENANT_ID' WHERE tenantId IS NULL OR tenantId = '00000000-0000-0000-0000-000000000000'")
+        }
+    }
+}
+
 private fun addColumnIfMissing(db: SupportSQLiteDatabase, table: String, column: String, sql: String) {
     db.query("PRAGMA table_info($table)").use { cursor ->
         val nameIndex = cursor.getColumnIndex("name")
@@ -80,7 +90,7 @@ private fun addColumnIfMissing(db: SupportSQLiteDatabase, table: String, column:
 class AppContainer(private val application: Application) {
     val database: BorgDatabase by lazy {
         Room.databaseBuilder(application, BorgDatabase::class.java, BorgDatabase.DATABASE_NAME)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
     }
 
