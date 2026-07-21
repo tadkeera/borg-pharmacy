@@ -1,37 +1,44 @@
 # صفحة استعلام مندوبي الأدوية على Vercel
 
-تمت إضافة صفحة ويب واحدة في جذر المستودع:
+تم تجهيز صفحة الويب الخاصة بمندوبي الأدوية مع شعار برج الأطباء المرفق.
 
-- `index.html`: يحتوي HTML + CSS + JavaScript بالكامل، ويستخدم Tailwind CDN وSupabase JS CDN.
-- `vercel.json`: إعدادات استضافة Static على Vercel مع Headers أمنية.
-- `supabase/2026_07_representative_web_portal.sql`: SQL لتجهيز View باسم `schedules` وصلاحيات قراءة فقط للـ `anon`.
+## الملفات
 
-## طريقة النشر على Vercel
+- `index.html`: نسخة الصفحة في جذر المستودع، واللوجو مدمج داخلها كـ Data URI.
+- `web-portal/index.html`: نسخة النشر الآمن على Vercel، وتحتوي على نفس الصفحة واللوجو مدمج داخلها.
+- `web-portal/vercel.json`: إعدادات Vercel للصفحة فقط.
+- `supabase/2026_07_representative_web_portal.sql`: ملف SQL جاهز للنسخ إلى Supabase SQL Editor.
+
+## طريقة النشر اليدوي على Vercel من لوحة التحكم
+
+إذا أردت ربط GitHub مباشرة من Vercel:
 
 1. افتح Vercel ثم اختر **Add New Project**.
-2. اربط المستودع: `tadkeera/borg-pharmacy`.
-3. اترك Framework Preset على **Other** أو **Static**.
-4. اترك Build Command فارغاً.
-5. اترك Output Directory فارغاً.
+2. اختر المستودع: `tadkeera/borg-pharmacy`.
+3. مهم جداً: اجعل **Root Directory** هو:
+
+```text
+web-portal
+```
+
+4. اترك Framework Preset على **Other** أو **Static**.
+5. اترك Build Command فارغاً.
 6. اضغط Deploy.
 
-> إذا كان المستودع مربوطاً بالفعل بـ Vercel، فمجرد push إلى `main` سيبدأ نشر الصفحة تلقائياً.
+استخدام `web-portal` مهم حتى لا يتم نشر ملفات تطبيق Android أو ملفات أخرى غير مطلوبة.
 
 ## إعداد Supabase الأمني
 
-نفّذ الملف التالي في Supabase SQL Editor:
+نفّذ محتوى الملف التالي كاملاً في Supabase SQL Editor:
 
-```sql
+```text
 supabase/2026_07_representative_web_portal.sql
 ```
 
-مهم: لا تلصق مسار الملف فقط داخل SQL Editor؛ افتح الملف وانسخ محتواه كاملاً ثم نفّذه.
-
-هذا الملف يجعل قراءة `companies` و`visits`/`schedules` متاحة للصفحة العامة، ويمنع `anon` من عمليات `insert/update/delete` على الجداول الأساسية.
+لا تلصق مسار الملف فقط داخل SQL Editor؛ افتح الملف وانسخ محتواه كاملاً ثم نفّذه.
 
 ## ملاحظة مهمة عن تطبيق Android
 
-إذا كان تطبيق Android يكتب إلى Supabase حالياً باستخدام `anon key`، فإن تفعيل منع الكتابة للـ `anon` سيمنع هذه الكتابة. الحل الإنتاجي الآمن هو نقل عمليات الكتابة إلى:
+مفتاح `anon` لا يمكن أن يكون للويب قراءة فقط وفي نفس الوقت يسمح لتطبيق Android بالكتابة بدون تسجيل دخول؛ لأن أي شخص يمتلك مفتاح `anon` يستطيع استدعاء نفس الصلاحيات.
 
-- Supabase Auth مع سياسات `authenticated`، أو
-- Backend آمن يستخدم `service_role` ولا يتم نشره داخل التطبيق أو صفحة الويب.
+لذلك ملف SQL يمنع الكتابة للـ `anon` لحماية الصفحة العامة. إذا كان تطبيق Android يعتمد حالياً على الكتابة إلى Supabase باستخدام `anon key`، فيجب لاحقاً نقل الكتابة إلى Supabase Auth أو Backend آمن يستخدم `service_role`.

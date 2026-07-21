@@ -1,0 +1,22 @@
+# عند نشر جذر المستودع بالخطأ إلى Vercel، لا ترفع ملفات تطبيق Android أو ملفات البناء.
+# النشر الموصى به هو من مجلد web-portal فقط.
+app/
+gradle/
+keystore/
+release/
+docs/
+supabase/
+termux-bot/
+.github/
+.gradle/
+build/
+dist/
+out/
+*.apk
+*.jks
+*.keystore
+*.properties
+*.kts
+gradlew
+gradlew.bat
+README.md
