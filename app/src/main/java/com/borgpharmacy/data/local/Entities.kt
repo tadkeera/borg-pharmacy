@@ -1,5 +1,6 @@
 package com.borgpharmacy.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -32,7 +33,7 @@ interface TenantScopedEntity {
 )
 data class CompanyEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val name: String,
     val tier: String = Tier.UNRATED.name,
     val baseDayIndex: Int? = null,
@@ -41,8 +42,8 @@ data class CompanyEntity(
     override val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
     val dirty: Boolean = true,
-    override val syncStatus: String = SyncStatus.PENDING.name,
-    override val isDeleted: Boolean = deletedAt != null,
+    @ColumnInfo(defaultValue = "'SYNCED'") override val syncStatus: String = SyncStatus.PENDING.name,
+    @ColumnInfo(defaultValue = "0") override val isDeleted: Boolean = deletedAt != null,
 ) : TenantScopedEntity
 
 @Entity(
@@ -57,7 +58,7 @@ data class CompanyEntity(
 )
 data class RepresentativeEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val companyId: String,
     val name: String,
     val phone: String = "+967",
@@ -65,8 +66,8 @@ data class RepresentativeEntity(
     override val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
     val dirty: Boolean = true,
-    override val syncStatus: String = SyncStatus.PENDING.name,
-    override val isDeleted: Boolean = deletedAt != null,
+    @ColumnInfo(defaultValue = "'SYNCED'") override val syncStatus: String = SyncStatus.PENDING.name,
+    @ColumnInfo(defaultValue = "0") override val isDeleted: Boolean = deletedAt != null,
 ) : TenantScopedEntity
 
 @Entity(
@@ -81,7 +82,7 @@ data class RepresentativeEntity(
 )
 data class VisitEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val companyId: String,
     val cycleStartEpochDay: Long,
     val dayOfCycle: Int,
@@ -94,8 +95,8 @@ data class VisitEntity(
     override val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
     val dirty: Boolean = true,
-    override val syncStatus: String = SyncStatus.PENDING.name,
-    override val isDeleted: Boolean = deletedAt != null,
+    @ColumnInfo(defaultValue = "'SYNCED'") override val syncStatus: String = SyncStatus.PENDING.name,
+    @ColumnInfo(defaultValue = "0") override val isDeleted: Boolean = deletedAt != null,
 ) : TenantScopedEntity
 
 @Entity(
@@ -118,19 +119,19 @@ data class VisitEntity(
 )
 data class PrintLogEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val repId: String,
     val visitId: String,
     val printedAt: Long = System.currentTimeMillis(),
-    override val updatedAt: Long = System.currentTimeMillis(),
-    override val syncStatus: String = SyncStatus.PENDING.name,
-    override val isDeleted: Boolean = false,
+    @ColumnInfo(defaultValue = "0") override val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "'SYNCED'") override val syncStatus: String = SyncStatus.PENDING.name,
+    @ColumnInfo(defaultValue = "0") override val isDeleted: Boolean = false,
 ) : TenantScopedEntity
 
 @Entity(tableName = "users", indices = [Index(value = ["username"], unique = true), Index("tenantId")])
 data class UserEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val username: String,
     val displayName: String,
     val role: String,
@@ -139,18 +140,18 @@ data class UserEntity(
     val active: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
     override val updatedAt: Long = System.currentTimeMillis(),
-    override val syncStatus: String = SyncStatus.PENDING.name,
-    override val isDeleted: Boolean = !active,
+    @ColumnInfo(defaultValue = "'SYNCED'") override val syncStatus: String = SyncStatus.PENDING.name,
+    @ColumnInfo(defaultValue = "0") override val isDeleted: Boolean = !active,
 ) : TenantScopedEntity
 
 @Entity(tableName = "app_settings", indices = [Index("tenantId")])
 data class AppSettingEntity(
     @PrimaryKey val key: String,
     val value: String,
-    override val tenantId: String = DEFAULT_TENANT_ID,
-    override val updatedAt: Long = System.currentTimeMillis(),
-    override val syncStatus: String = SyncStatus.PENDING.name,
-    override val isDeleted: Boolean = false,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "0") override val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "'SYNCED'") override val syncStatus: String = SyncStatus.PENDING.name,
+    @ColumnInfo(defaultValue = "0") override val isDeleted: Boolean = false,
 ) : TenantScopedEntity
 
 data class PrintCountTuple(

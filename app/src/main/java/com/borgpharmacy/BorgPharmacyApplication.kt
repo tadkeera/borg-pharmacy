@@ -45,6 +45,25 @@ private val MIGRATION_2_3 = object : Migration(2, 3) {
         db.execSQL("UPDATE representatives SET isDeleted = 1 WHERE deletedAt IS NOT NULL")
         db.execSQL("UPDATE visits SET isDeleted = 1 WHERE deletedAt IS NOT NULL")
         db.execSQL("UPDATE users SET isDeleted = CASE WHEN active = 1 THEN 0 ELSE 1 END")
+
+        // Room validates indices after migration. Create the same indices declared on @Entity classes.
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_companies_tenantId ON companies(tenantId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_companies_tenantId_name ON companies(tenantId, name)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_representatives_tenantId ON representatives(tenantId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_representatives_companyId ON representatives(companyId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_representatives_phone ON representatives(phone)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_representatives_tenantId_phone ON representatives(tenantId, phone)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_visits_tenantId ON visits(tenantId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_visits_companyId ON visits(companyId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_visits_cycleStartEpochDay ON visits(cycleStartEpochDay)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_visits_dateEpochDay ON visits(dateEpochDay)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_visits_shift ON visits(shift)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_visits_tenantId_updatedAt ON visits(tenantId, updatedAt)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_print_logs_tenantId ON print_logs(tenantId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_print_logs_repId ON print_logs(repId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_print_logs_visitId ON print_logs(visitId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_users_tenantId ON users(tenantId)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_app_settings_tenantId ON app_settings(tenantId)")
     }
 }
 
