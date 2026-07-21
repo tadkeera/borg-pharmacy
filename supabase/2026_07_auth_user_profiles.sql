@@ -6,6 +6,16 @@ begin;
 
 create extension if not exists pgcrypto;
 
+-- Tenants table must exist before inserting the first tenant.
+create table if not exists public.tenants (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text unique,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  is_deleted boolean not null default false
+);
+
 -- Stable first tenant for صيدلية برج الأطباء.
 insert into public.tenants (id, name, slug)
 values ('00000000-0000-0000-0000-000000000001', 'صيدلية برج الأطباء', 'borg-alatiba')
@@ -128,6 +138,27 @@ for update
 to authenticated
 using (tenant_id = public.current_tenant_id() and public.current_app_role() = 'ADMIN')
 with check (tenant_id = public.current_tenant_id() and public.current_app_role() = 'ADMIN');
+
+-- Ensure business tables are ready for tenant RLS even if the previous multi-tenant SQL was not executed.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['companies','representatives','visits'] loop
+    if to_regclass('public.' || t) is not null then
+      execute format('alter table public.%I add column if not exists tenant_id uuid', t);
+      execute format('alter table public.%I add column if not exists sync_status text not null default ''SYNCED''', t);
+      execute format('alter table public.%I add column if not exists is_deleted boolean not null default false', t);
+      execute format('update public.%I set tenant_id = ''00000000-0000-0000-0000-000000000001''::uuid where tenant_id is null', t);
+      execute format('create index if not exists idx_%I_tenant_updated on public.%I(tenant_id, updated_at)', t, t);
+      execute format('create index if not exists idx_%I_tenant_active on public.%I(tenant_id) where is_deleted = false', t, t);
+    end if;
+  end loop;
+end $$;
+
+update public.companies set is_deleted = true where deleted_at is not null;
+update public.representatives set is_deleted = true where deleted_at is not null;
+update public.visits set is_deleted = true where deleted_at is not null;
 
 -- Tenant RLS for business tables when Android Auth mode is enabled.
 do $$
