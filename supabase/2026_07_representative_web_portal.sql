@@ -167,4 +167,253 @@ to authenticated
 using (true)
 with check (true);
 
+
+-- =========================================================
+-- تسجيل مندوبي صفحة الاستعلامات العامة + سجل عمليات البحث
+-- =========================================================
+create extension if not exists pgcrypto;
+
+create or replace function public.web_normalize_representative_name(input text)
+returns text
+language sql
+immutable
+as $$
+  select public.web_normalize_company_name(input);
+$$;
+
+create or replace function public.web_normalize_phone(input text)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  digits text;
+begin
+  digits := regexp_replace(coalesce(input, ''), '\D', '', 'g');
+
+  -- مفتاح اليمن المعتمد في التطبيق هو +967. إذا بدأ الرقم بـ 967 لا نكرره.
+  if digits like '967%' then
+    digits := substring(digits from 4);
+  end if;
+
+  -- إذا أدخل المستخدم الرقم بصفر محلي، نزيل الصفر ونضيف +967.
+  if digits like '0%' then
+    digits := substring(digits from 2);
+  end if;
+
+  if digits = '' then
+    return '+967';
+  end if;
+
+  return '+967' || digits;
+end;
+$$;
+
+create table if not exists public.representative_portal_logs (
+  id uuid primary key default gen_random_uuid(),
+  representative_id uuid not null references public.representatives(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  search_text text not null default 'بحث جدول الزيارات',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_representative_portal_logs_rep_created
+on public.representative_portal_logs (representative_id, created_at desc);
+
+create index if not exists idx_representative_portal_logs_company_created
+on public.representative_portal_logs (company_id, created_at desc);
+
+alter table public.representative_portal_logs enable row level security;
+
+grant select on table public.representatives to anon;
+grant select on table public.representative_portal_logs to anon;
+
+-- لا نعطي anon صلاحية إدخال مباشرة على جدول المندوبين أو السجل؛ الإدخال فقط عبر دوال SECURITY DEFINER الآمنة.
+revoke insert, update, delete on table public.representatives from anon;
+revoke insert, update, delete on table public.representative_portal_logs from anon;
+
+drop policy if exists "web_reps_select_readonly" on public.representatives;
+create policy "web_reps_select_readonly"
+on public.representatives
+for select
+to anon
+using (deleted_at is null);
+
+drop policy if exists "web_portal_logs_select_readonly" on public.representative_portal_logs;
+create policy "web_portal_logs_select_readonly"
+on public.representative_portal_logs
+for select
+to anon
+using (true);
+
+create or replace view public.representative_portal_report
+with (security_invoker = true)
+as
+select
+  r.id as representative_id,
+  r.name as representative_name,
+  r.phone as representative_phone,
+  c.id as company_id,
+  c.name as company_name,
+  count(l.id)::integer as search_count,
+  min(l.created_at) as first_search_at,
+  max(l.created_at) as last_search_at
+from public.representative_portal_logs l
+join public.representatives r on r.id = l.representative_id
+join public.companies c on c.id = l.company_id
+where r.deleted_at is null
+  and c.deleted_at is null
+group by r.id, r.name, r.phone, c.id, c.name
+order by max(l.created_at) desc;
+
+grant select on table public.representative_portal_report to anon;
+
+create or replace function public.register_representative_portal(
+  p_name text,
+  p_phone text,
+  p_company_id uuid
+)
+returns table (
+  status text,
+  representative_id uuid,
+  rep_name text,
+  phone text,
+  company_id uuid,
+  company_name text,
+  message text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text;
+  v_phone text;
+  v_company_name text;
+  v_existing record;
+  v_new_id uuid;
+  v_now bigint;
+begin
+  v_name := trim(coalesce(p_name, ''));
+  v_phone := public.web_normalize_phone(p_phone);
+  v_now := (extract(epoch from now()) * 1000)::bigint;
+
+  if length(v_name) < 3 then
+    return query select 'invalid_name'::text, null::uuid, v_name, v_phone, p_company_id, null::text, 'اسم المندوب غير مكتمل'::text;
+    return;
+  end if;
+
+  if length(regexp_replace(v_phone, '\D', '', 'g')) < 10 then
+    return query select 'invalid_phone'::text, null::uuid, v_name, v_phone, p_company_id, null::text, 'رقم الجوال غير صحيح'::text;
+    return;
+  end if;
+
+  select c.name into v_company_name
+  from public.companies c
+  where c.id = p_company_id
+    and c.deleted_at is null
+  limit 1;
+
+  if v_company_name is null then
+    return query select 'company_not_found'::text, null::uuid, v_name, v_phone, p_company_id, null::text, 'الشركة غير موجودة أو محذوفة'::text;
+    return;
+  end if;
+
+  -- منع تكرار رقم الهاتف نهائياً لأكثر من مندوب نشط.
+  select r.id, r.name, r.phone, c.id as c_id, c.name as c_name
+  into v_existing
+  from public.representatives r
+  join public.companies c on c.id = r.company_id
+  where r.deleted_at is null
+    and public.web_normalize_phone(r.phone) = v_phone
+  order by r.updated_at desc
+  limit 1;
+
+  if found then
+    return query select 'phone_exists'::text, v_existing.id, v_existing.name, public.web_normalize_phone(v_existing.phone), v_existing.c_id, v_existing.c_name, 'رقم الجوال مسجل مسبقاً'::text;
+    return;
+  end if;
+
+  -- منع تكرار اسم المندوب النشط.
+  select r.id, r.name, r.phone, c.id as c_id, c.name as c_name
+  into v_existing
+  from public.representatives r
+  join public.companies c on c.id = r.company_id
+  where r.deleted_at is null
+    and public.web_normalize_representative_name(r.name) = public.web_normalize_representative_name(v_name)
+  order by r.updated_at desc
+  limit 1;
+
+  if found then
+    return query select 'name_exists'::text, v_existing.id, v_existing.name, public.web_normalize_phone(v_existing.phone), v_existing.c_id, v_existing.c_name, 'اسم المندوب مسجل مسبقاً'::text;
+    return;
+  end if;
+
+  v_new_id := gen_random_uuid();
+
+  insert into public.representatives (
+    id,
+    company_id,
+    name,
+    phone,
+    created_at,
+    updated_at,
+    deleted_at
+  ) values (
+    v_new_id,
+    p_company_id,
+    v_name,
+    v_phone,
+    v_now,
+    v_now,
+    null
+  );
+
+  return query select 'created'::text, v_new_id, v_name, v_phone, p_company_id, v_company_name, 'تم حفظ بيانات المندوب بنجاح'::text;
+end;
+$$;
+
+create or replace function public.log_representative_portal_search(
+  p_representative_id uuid,
+  p_company_id uuid
+)
+returns table (
+  search_count integer,
+  created_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_created_at timestamptz;
+  v_count integer;
+begin
+  if not exists (
+    select 1
+    from public.representatives r
+    where r.id = p_representative_id
+      and r.company_id = p_company_id
+      and r.deleted_at is null
+  ) then
+    return query select 0::integer, now();
+    return;
+  end if;
+
+  insert into public.representative_portal_logs (representative_id, company_id)
+  values (p_representative_id, p_company_id)
+  returning representative_portal_logs.created_at into v_created_at;
+
+  select count(*)::integer into v_count
+  from public.representative_portal_logs
+  where representative_id = p_representative_id
+    and company_id = p_company_id;
+
+  return query select v_count, v_created_at;
+end;
+$$;
+
+grant execute on function public.register_representative_portal(text, text, uuid) to anon;
+grant execute on function public.log_representative_portal_search(uuid, uuid) to anon;
+
 commit;

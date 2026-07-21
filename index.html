@@ -235,39 +235,67 @@
         </p>
       </header>
 
-      <form id="searchForm" class="grid gap-4" autocomplete="off">
-        <label for="companySearch" class="font-extrabold text-slate-800">اسم الشركة</label>
+      <form id="registrationForm" class="grid gap-4" autocomplete="off">
+        <div class="message info">
+          أدخل بياناتك مرة واحدة فقط. بعد الحفظ سيتم فتح صفحة البحث مباشرة في كل مرة تزور فيها الرابط.
+        </div>
 
+        <label for="representativeName" class="font-extrabold text-slate-800">اسم المندوب</label>
+        <div class="input-wrap">
+          <span class="input-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <input id="representativeName" class="search-input" type="text" placeholder="اكتب اسم المندوب كاملاً" aria-label="اسم المندوب" />
+        </div>
+
+        <label for="companySearch" class="font-extrabold text-slate-800">اسم الشركة التابع لها المندوب</label>
         <div class="input-wrap">
           <span class="input-icon" aria-hidden="true">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
               <path d="m21 21-4.35-4.35M10.8 18.2a7.4 7.4 0 1 1 0-14.8 7.4 7.4 0 0 1 0 14.8Z" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
             </svg>
           </span>
-          <input
-            id="companySearch"
-            class="search-input"
-            type="text"
-            inputmode="search"
-            placeholder="اكتب 3 أحرف أو أكثر من اسم الشركة..."
-            aria-label="البحث عن اسم الشركة"
-            aria-autocomplete="list"
-            aria-controls="suggestionsList"
-            aria-expanded="false"
-          />
-
-          <!-- قائمة الإكمال التلقائي -->
+          <input id="companySearch" class="search-input" type="text" inputmode="search" placeholder="اكتب 3 أحرف أو أكثر ثم اختر الشركة من القائمة" aria-label="البحث عن اسم الشركة" aria-autocomplete="list" aria-controls="suggestionsList" aria-expanded="false" />
           <div id="suggestionsList" class="suggestions hidden" role="listbox"></div>
         </div>
 
-        <button
-          id="searchButton"
-          type="submit"
-          class="min-h-14 rounded-2xl bg-blue-700 px-6 py-3 text-white font-black text-lg shadow-lg shadow-blue-700/20 transition hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          بحث
+        <label for="representativePhone" class="font-extrabold text-slate-800">رقم جوال المندوب</label>
+        <div class="input-wrap">
+          <span class="input-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM10 18h4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <input id="representativePhone" class="search-input" type="tel" inputmode="tel" dir="ltr" value="+967" placeholder="+9677XXXXXXXX" aria-label="رقم جوال المندوب" />
+        </div>
+
+        <button id="saveButton" type="submit" class="min-h-14 rounded-2xl bg-blue-700 px-6 py-3 text-white font-black text-lg shadow-lg shadow-blue-700/20 transition hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60">
+          حفظ
         </button>
       </form>
+
+      <section id="searchPanel" class="hidden">
+        <article class="result-card">
+          <h2 class="result-title">صيدلية برج الأطباء - إدارة الصيدلية</h2>
+          <div id="representativeSummary" class="message success"></div>
+          <button id="lookupButton" type="button" class="mt-5 min-h-14 w-full rounded-2xl bg-blue-700 px-6 py-3 text-white font-black text-lg shadow-lg shadow-blue-700/20 transition hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60">
+            بحث
+          </button>
+          <button id="resetRepresentativeButton" type="button" class="mt-3 w-full rounded-2xl border border-slate-300 bg-white px-5 py-3 font-extrabold text-slate-600">
+            تغيير بيانات المندوب
+          </button>
+        </article>
+      </section>
+
+      <div id="conflictModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+        <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+          <h3 id="conflictTitle" class="text-xl font-black text-red-700">تنبيه</h3>
+          <p id="conflictMessage" class="mt-3 leading-8 font-bold text-slate-700"></p>
+          <button id="conflictClose" type="button" class="mt-5 w-full rounded-2xl bg-blue-700 px-5 py-3 font-black text-white">حسناً</button>
+        </div>
+      </div>
 
       <!-- رسائل الحالة -->
       <div id="statusBox" class="mt-5 hidden" aria-live="polite"></div>
@@ -285,15 +313,29 @@
     const SUPABASE_URL = "https://dtkldxmfkhipdgiltzjl.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0a2xkeG1ma2hpcGRnaWx0empsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNzY3NjIsImV4cCI6MjA5ODg1Mjc2Mn0.jXEUggNeO_tvt2lm7BRRbzm4p1eI-WZRvojLVdKn2fg";
 
+    const registrationForm = document.getElementById("registrationForm");
+    const representativeNameInput = document.getElementById("representativeName");
     const companyInput = document.getElementById("companySearch");
+    const representativePhoneInput = document.getElementById("representativePhone");
     const suggestionsList = document.getElementById("suggestionsList");
-    const searchForm = document.getElementById("searchForm");
-    const searchButton = document.getElementById("searchButton");
+    const saveButton = document.getElementById("saveButton");
+    const searchPanel = document.getElementById("searchPanel");
+    const representativeSummary = document.getElementById("representativeSummary");
+    const lookupButton = document.getElementById("lookupButton");
+    const resetRepresentativeButton = document.getElementById("resetRepresentativeButton");
+    const conflictModal = document.getElementById("conflictModal");
+    const conflictTitle = document.getElementById("conflictTitle");
+    const conflictMessage = document.getElementById("conflictMessage");
+    const conflictClose = document.getElementById("conflictClose");
     const statusBox = document.getElementById("statusBox");
     const results = document.getElementById("results");
 
+    const REPRESENTATIVE_STORAGE_KEY = "borg_pharmacy_representative_profile_v1";
+    const DEFAULT_COUNTRY_CODE = "+967";
+
     let db = null;
     let selectedCompany = null;
+    let activeRepresentative = null;
     let latestAutocompleteRequest = 0;
     let autocompleteTimer = null;
     let companyNameColumn = "name"; // في قاعدة التطبيق الحالية اسم العمود هو name. إذا كان لديك company_name سيتم اكتشافه تلقائياً.
@@ -339,11 +381,11 @@
       statusBox.innerHTML = "";
     }
 
-    function setLoading(isLoading) {
-      searchButton.disabled = isLoading;
-      searchButton.innerHTML = isLoading
-        ? 'جاري البحث <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>'
-        : "بحث";
+    function setButtonLoading(button, isLoading, idleText, loadingText = "جاري المعالجة") {
+      button.disabled = isLoading;
+      button.innerHTML = isLoading
+        ? `${loadingText} <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>`
+        : idleText;
     }
 
     function openSuggestions() {
@@ -701,46 +743,185 @@
       `;
     }
 
-    async function handleSearch(event) {
+    function normalizePhoneInput(value) {
+      const digits = String(value ?? "").replace(/\D/g, "");
+      let local = digits;
+      if (local.startsWith("967")) local = local.slice(3);
+      if (local.startsWith("0")) local = local.slice(1);
+      return `${DEFAULT_COUNTRY_CODE}${local}`;
+    }
+
+    function showConflict(title, message) {
+      conflictTitle.textContent = title;
+      conflictMessage.innerHTML = message;
+      conflictModal.classList.remove("hidden");
+      conflictModal.classList.add("flex");
+    }
+
+    function closeConflict() {
+      conflictModal.classList.add("hidden");
+      conflictModal.classList.remove("flex");
+    }
+
+    function saveRepresentativeProfile(profile) {
+      localStorage.setItem(REPRESENTATIVE_STORAGE_KEY, JSON.stringify(profile));
+    }
+
+    function loadRepresentativeProfile() {
+      try {
+        const raw = localStorage.getItem(REPRESENTATIVE_STORAGE_KEY);
+        if (!raw) return null;
+        const profile = JSON.parse(raw);
+        if (!profile?.id || !profile?.company?.id) return null;
+        return profile;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function showRegistrationForm() {
+      activeRepresentative = null;
+      registrationForm.classList.remove("hidden");
+      searchPanel.classList.add("hidden");
+      results.innerHTML = "";
+      hideStatus();
+    }
+
+    function showSearchPanel(profile) {
+      activeRepresentative = profile;
+      registrationForm.classList.add("hidden");
+      searchPanel.classList.remove("hidden");
+      representativeSummary.innerHTML = `
+        <div><strong>المندوب:</strong> ${escapeHtml(profile.name)}</div>
+        <div><strong>رقم الجوال:</strong> <span dir="ltr">${escapeHtml(profile.phone)}</span></div>
+        <div><strong>الشركة:</strong> ${escapeHtml(profile.company.name)}</div>
+      `;
+      results.innerHTML = "";
+      hideStatus();
+    }
+
+    function buildConflictMessage(result) {
+      return `
+        البيانات موجودة بالفعل:<br>
+        <strong>اسم المندوب:</strong> ${escapeHtml(result.rep_name || "غير محدد")}<br>
+        <strong>رقم الجوال:</strong> <span dir="ltr">${escapeHtml(result.phone || "غير محدد")}</span><br>
+        <strong>الشركة:</strong> ${escapeHtml(result.company_name || "غير محدد")}
+      `;
+    }
+
+    async function handleRegistration(event) {
       event.preventDefault();
       closeSuggestions();
       results.innerHTML = "";
+      hideStatus();
 
-      const term = cleanSearchTerm(companyInput.value);
-      if (term.length < 3) {
-        showStatus("warn", "يرجى كتابة 3 أحرف أو أكثر من اسم الشركة.");
+      const repName = cleanCompanyName(representativeNameInput.value);
+      const phone = normalizePhoneInput(representativePhoneInput.value);
+
+      if (repName.length < 3) {
+        showStatus("warn", "يرجى إدخال اسم المندوب كاملاً.");
+        return;
+      }
+
+      if (!selectedCompany || companyKey(companyInput.value) !== selectedCompany.key) {
+        const resolved = await resolveCompanyFromInput(companyInput.value);
+        if (!resolved) {
+          showStatus("warn", "يرجى اختيار الشركة من القائمة المنسدلة بعد كتابة 3 أحرف أو أكثر.");
+          return;
+        }
+        selectedCompany = resolved;
+        companyInput.value = resolved.name;
+      }
+
+      if (phone.replace(/\D/g, "").length < 10) {
+        showStatus("warn", "يرجى إدخال رقم جوال صحيح مع مفتاح البلد +967.");
         return;
       }
 
       try {
-        setLoading(true);
-        showStatus("info", 'جاري البحث عن جدول الزيارات <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>');
+        representativePhoneInput.value = phone;
+        setButtonLoading(saveButton, true, "حفظ", "جاري حفظ بيانات المندوب");
+        showStatus("info", 'جاري حفظ بيانات المندوب <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>');
 
-        const company = await resolveCompanyFromInput(term);
-        if (!company) {
-          results.innerHTML = "";
-          showStatus("warn", "لم يتم العثور على شركة بهذا الاسم. جرّب اختيار الشركة من القائمة المنسدلة.");
+        const { data, error } = await db.rpc("register_representative_portal", {
+          p_name: repName,
+          p_phone: phone,
+          p_company_id: selectedCompany.id
+        });
+
+        if (error) throw error;
+        const result = Array.isArray(data) ? data[0] : data;
+
+        if (!result || result.status !== "created") {
+          const title = result?.status === "phone_exists"
+            ? "رقم الجوال مسجل مسبقاً"
+            : "اسم المندوب مسجل مسبقاً";
+          showConflict(title, buildConflictMessage(result || {}));
+          showStatus("warn", "لم يتم الحفظ لأن بيانات المندوب مسجلة مسبقاً.");
           return;
         }
 
-        selectedCompany = company;
-        companyInput.value = company.name;
+        const profile = {
+          id: result.representative_id,
+          name: result.rep_name,
+          phone: result.phone,
+          company: {
+            id: result.company_id,
+            ids: uniqueValues([result.company_id, ...(selectedCompany.ids || [])]),
+            name: result.company_name,
+            key: companyKey(result.company_name)
+          },
+          savedAt: new Date().toISOString()
+        };
 
-        const schedules = await fetchSchedules(company);
-        renderResults(company, schedules);
+        saveRepresentativeProfile(profile);
+        showSearchPanel(profile);
+        showStatus("success", "تم حفظ بيانات المندوب بنجاح. يمكنك الآن الضغط على بحث لعرض جدول الزيارات.");
       } catch (error) {
-        console.error("Search error:", error);
-        results.innerHTML = "";
-        showStatus("error", "حدث خطأ أثناء البحث. تأكد من الاتصال بالإنترنت ومن تفعيل صلاحيات القراءة في Supabase.");
+        console.error("Registration error:", error);
+        showStatus("error", "حدث خطأ أثناء حفظ بيانات المندوب. تأكد من تنفيذ ملف SQL الخاص بصفحة الاستعلامات في Supabase.");
       } finally {
-        setLoading(false);
+        setButtonLoading(saveButton, false, "حفظ");
+      }
+    }
+
+    async function logRepresentativeSearch(profile) {
+      try {
+        await db.rpc("log_representative_portal_search", {
+          p_representative_id: profile.id,
+          p_company_id: profile.company.id
+        });
+      } catch (error) {
+        console.warn("Unable to log representative search:", error);
+      }
+    }
+
+    async function handleLookup() {
+      if (!activeRepresentative) {
+        showRegistrationForm();
+        return;
+      }
+
+      try {
+        setButtonLoading(lookupButton, true, "بحث", "جاري البحث عن جدول الزيارات");
+        showStatus("info", 'جاري البحث عن جدول الزيارات <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>');
+        await logRepresentativeSearch(activeRepresentative);
+        const schedules = await fetchSchedules(activeRepresentative.company);
+        renderResults(activeRepresentative.company, schedules);
+      } catch (error) {
+        console.error("Lookup error:", error);
+        results.innerHTML = "";
+        showStatus("error", "حدث خطأ أثناء البحث. تأكد من الاتصال بالإنترنت ومن صلاحيات Supabase.");
+      } finally {
+        setButtonLoading(lookupButton, false, "بحث");
       }
     }
 
     function init() {
       if (!window.supabase?.createClient) {
         showStatus("error", "تعذر تحميل مكتبة Supabase. يرجى التأكد من اتصال الإنترنت ثم إعادة تحميل الصفحة.");
-        searchButton.disabled = true;
+        saveButton.disabled = true;
+        lookupButton.disabled = true;
         return;
       }
 
@@ -749,7 +930,22 @@
       });
 
       setupAutocomplete();
-      searchForm.addEventListener("submit", handleSearch);
+      registrationForm.addEventListener("submit", handleRegistration);
+      lookupButton.addEventListener("click", handleLookup);
+      conflictClose.addEventListener("click", closeConflict);
+      conflictModal.addEventListener("click", (event) => { if (event.target === conflictModal) closeConflict(); });
+      resetRepresentativeButton.addEventListener("click", () => {
+        localStorage.removeItem(REPRESENTATIVE_STORAGE_KEY);
+        representativeNameInput.value = "";
+        companyInput.value = "";
+        representativePhoneInput.value = DEFAULT_COUNTRY_CODE;
+        selectedCompany = null;
+        showRegistrationForm();
+      });
+
+      const savedProfile = loadRepresentativeProfile();
+      if (savedProfile) showSearchPanel(savedProfile);
+      else showRegistrationForm();
     }
 
     init();

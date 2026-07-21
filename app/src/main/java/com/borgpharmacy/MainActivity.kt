@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
                 onCreateUser = viewModel::createUser,
                 onSaveBotSettings = viewModel::saveBotSettings,
                 onRefreshBotData = viewModel::refreshBotSettings,
+                onRefreshRepresentativeInquiries = viewModel::refreshRepresentativeInquiries,
                 onMarkVisitStatus = viewModel::markVisitStatus,
                 onShareToday = { shareTodayStories(state) },
                 onPrint = { company: Company, rep: Representative, visit: Visit ->

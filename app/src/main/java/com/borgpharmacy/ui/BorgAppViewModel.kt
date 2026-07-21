@@ -13,6 +13,7 @@ import com.borgpharmacy.domain.CycleCalculator
 import com.borgpharmacy.domain.CycleInfo
 import com.borgpharmacy.domain.PrintCount
 import com.borgpharmacy.domain.Representative
+import com.borgpharmacy.domain.RepresentativeInquiryReport
 import com.borgpharmacy.domain.Tier
 import com.borgpharmacy.domain.UserAccount
 import com.borgpharmacy.domain.UserRole
@@ -47,6 +48,7 @@ class BorgAppViewModel(
             }
             refreshReports()
             refreshBotSettings()
+            refreshRepresentativeInquiries()
         }
         viewModelScope.launch { repository.observeCompanies().collect { value -> _state.update { it.copy(companies = value) } } }
         viewModelScope.launch { repository.observeRepresentatives().collect { value -> _state.update { it.copy(representatives = value) } } }
@@ -159,6 +161,7 @@ class BorgAppViewModel(
     fun syncNow() = viewModelScope.launch {
         repository.syncNow()
         refreshBotSettings()
+        refreshRepresentativeInquiries()
         snackbar("تم طلب المزامنة السحابية")
     }
 
@@ -180,6 +183,13 @@ class BorgAppViewModel(
                 Log.e("BorgViewModel", "Failed to refresh bot", t)
                 snackbar("فشل تحديث بيانات البوت السحابية")
             }
+        }
+    }
+
+    fun refreshRepresentativeInquiries() {
+        viewModelScope.launch {
+            val reports = repository.fetchRepresentativeInquiryReports()
+            _state.update { it.copy(representativeInquiryReports = reports) }
         }
     }
 
@@ -247,7 +257,8 @@ data class BorgUiState(
     val botPhone: String = "967",
     val botActive: Boolean = false,
     val botStatusMessage: String = "",
-    val botLogs: List<BotLog> = emptyList()
+    val botLogs: List<BotLog> = emptyList(),
+    val representativeInquiryReports: List<RepresentativeInquiryReport> = emptyList()
 ) {
     val isUnlocked: Boolean get() = currentUser != null && mustChangePasscodeUser == null
     val isAdmin: Boolean get() = currentUser?.role == UserRole.ADMIN

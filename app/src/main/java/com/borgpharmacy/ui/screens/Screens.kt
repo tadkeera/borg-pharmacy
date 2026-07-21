@@ -255,6 +255,7 @@ fun BorgApp(
     onSync: () -> Unit,
     onSaveBotSettings: (String, Boolean) -> Unit,
     onRefreshBotData: () -> Unit,
+    onRefreshRepresentativeInquiries: () -> Unit,
     onDismissMessage: () -> Unit,
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -281,6 +282,7 @@ fun BorgApp(
 
         var route by rememberSaveable { mutableStateOf(Route.HOME.name) }
         var showMoreSheet by rememberSaveable { mutableStateOf(false) }
+        var showRepresentativeInquiries by rememberSaveable { mutableStateOf(false) }
         val selected = Route.valueOf(route)
         val mainRoutes = listOf(Route.HOME, Route.WEEKLY, Route.COMPANIES, Route.DASHBOARD, Route.MORE)
         if (showMoreSheet) {
@@ -301,7 +303,14 @@ fun BorgApp(
                         val itemSelected = selected == item || (item == Route.MORE && selected in listOf(Route.BOT, Route.ENQUIRIES, Route.SETTINGS))
                         NavigationBarItem(
                             selected = itemSelected,
-                            onClick = { if (item == Route.MORE) showMoreSheet = true else route = item.name },
+                            onClick = {
+                                if (item == Route.MORE) {
+                                    showMoreSheet = true
+                                } else {
+                                    route = item.name
+                                    showRepresentativeInquiries = false
+                                }
+                            },
                             icon = { BorgColoredIcon(item, itemSelected) },
                             label = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                             colors = NavigationBarItemDefaults.colors(
@@ -337,7 +346,25 @@ fun BorgApp(
                 )
                 Route.ENQUIRIES -> EnquiriesScreen(state, onWhatsApp, contentModifier)
                 Route.BOT -> WhatsAppBotScreen(state = state, onSaveBotSettings = onSaveBotSettings, onRefreshBotData = onRefreshBotData, modifier = contentModifier)
-                Route.DASHBOARD -> DashboardScreen(state, contentModifier)
+                Route.DASHBOARD -> {
+                    if (showRepresentativeInquiries) {
+                        RepresentativeInquiriesScreen(
+                            state = state,
+                            onBack = { showRepresentativeInquiries = false },
+                            onRefresh = onRefreshRepresentativeInquiries,
+                            modifier = contentModifier,
+                        )
+                    } else {
+                        DashboardScreen(
+                            state = state,
+                            modifier = contentModifier,
+                            onOpenRepresentativeInquiries = {
+                                onRefreshRepresentativeInquiries()
+                                showRepresentativeInquiries = true
+                            },
+                        )
+                    }
+                }
                 Route.SETTINGS -> SettingsScreen(
                     state = state,
                     onBackup = onBackup,
@@ -1783,7 +1810,11 @@ private fun BotLogCard(log: BotLog) {
 }
 
 @Composable
-private fun DashboardScreen(state: BorgUiState, modifier: Modifier) {
+private fun DashboardScreen(
+    state: BorgUiState,
+    modifier: Modifier,
+    onOpenRepresentativeInquiries: () -> Unit,
+) {
     var from by rememberSaveable { mutableStateOf(state.cycleInfo.currentCycleStart.format(shortDateFormatter)) }
     var to by rememberSaveable { mutableStateOf(state.cycleInfo.currentCycleEnd.format(shortDateFormatter)) }
     val compliant = state.dashboardScores.filter { it.expectedVisits > 0 && it.completedVisits >= it.expectedVisits }
@@ -1808,10 +1839,116 @@ private fun DashboardScreen(state: BorgUiState, modifier: Modifier) {
                     colors = borgTextFieldColors(),value = to, onValueChange = { to = it }, label = { Text("إلى") }, modifier = Modifier.weight(1f))
             }
         }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenRepresentativeInquiries() },
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier.size(46.dp).clip(CircleShape).background(SoftBlue),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = BorgBlue)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("استعلامات المندوبين", fontWeight = FontWeight.ExtraBold, color = DeepNavy, fontSize = 16.sp)
+                        Text("عرض المندوبين المسجلين من صفحة الويب وعدد مرات البحث وآخر تاريخ ووقت.", color = Color.Gray, fontSize = 12.sp, lineHeight = 18.sp)
+                    }
+                    Text("${state.representativeInquiryReports.size}", color = BorgBlue, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                }
+            }
+        }
         item { ReportCard("1. الشركات الملتزمة", compliant.map { "${it.company.name}: ${"%.1f".format(it.scoreOutOf10)}/10" }) }
         item { ReportCard("2. الشركات غير الزائرة", nonVisiting.map { it.company.name }) }
         item { ReportCard("3. شركات بلا مندوبين مسجلين", noReps.map { it.name }) }
         item { ReportCard("4. شركات ضعيفة / قليلة الزيارة", weak.map { "${it.company.name}: ${"%.1f".format(it.scoreOutOf10)}/10" }) }
+    }
+}
+
+@Composable
+private fun RepresentativeInquiriesScreen(
+    state: BorgUiState,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    modifier: Modifier,
+) {
+    LaunchedEffect(Unit) { onRefresh() }
+
+    Column(modifier.fillMaxSize()) {
+        ScreenHeader(
+            title = "استعلامات المندوبين",
+            gradient = listOf(DeepNavy, BorgBlue)
+        )
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
+                        Text("رجوع للتقارير", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = onRefresh,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgBlue),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("تحديث", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    CountCard("عدد المندوبين", state.representativeInquiryReports.size.toString(), BorgBlue, Modifier.weight(1f))
+                    CountCard("عدد الاستعلامات", state.representativeInquiryReports.sumOf { it.searchCount }.toString(), Color(0xFF2FA66A), Modifier.weight(1f))
+                }
+            }
+
+            if (state.representativeInquiryReports.isEmpty()) {
+                item { EmptyState("لا توجد استعلامات مسجلة من صفحة الويب حتى الآن.") }
+            } else {
+                items(state.representativeInquiryReports, key = { it.representativeId + it.companyId }) { report ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(report.representativeName, fontWeight = FontWeight.ExtraBold, color = DeepNavy, fontSize = 16.sp)
+                            Text("رقم الهاتف: ${report.representativePhone}", color = Color.DarkGray, fontSize = 13.sp)
+                            Text("الشركة: ${report.companyName}", color = BorgBlue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            HorizontalDivider(color = Color(0xFFF0F4F8))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                CountCard("مرات البحث", report.searchCount.toString(), BorgRed, Modifier.weight(1f))
+                                CountCard("آخر بحث", report.lastSearchAt.ifBlank { "-" }, Color(0xFF2FA66A), Modifier.weight(1f))
+                            }
+                            Text("أول بحث: ${report.firstSearchAt.ifBlank { "-" }}", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

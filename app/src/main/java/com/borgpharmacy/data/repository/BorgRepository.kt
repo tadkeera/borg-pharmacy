@@ -20,6 +20,7 @@ import com.borgpharmacy.domain.CompanyReportScore
 import com.borgpharmacy.domain.CycleCalculator
 import com.borgpharmacy.domain.PrintCount
 import com.borgpharmacy.domain.Representative
+import com.borgpharmacy.domain.RepresentativeInquiryReport
 import com.borgpharmacy.domain.ScheduleGenerator
 import com.borgpharmacy.domain.SchedulePlan
 import com.borgpharmacy.domain.Tier
@@ -58,6 +59,19 @@ data class BotLogDto(
     @SerialName("created_at") val createdAt: String? = null,
 )
 
+
+@Serializable
+data class RepresentativePortalReportDto(
+    @SerialName("representative_id") val representativeId: String,
+    @SerialName("representative_name") val representativeName: String,
+    @SerialName("representative_phone") val representativePhone: String,
+    @SerialName("company_id") val companyId: String,
+    @SerialName("company_name") val companyName: String,
+    @SerialName("search_count") val searchCount: Int = 0,
+    @SerialName("first_search_at") val firstSearchAt: String? = null,
+    @SerialName("last_search_at") val lastSearchAt: String? = null,
+)
+
 interface BorgRepository {
     fun observeCompanies(): Flow<List<Company>>
     fun observeRepresentatives(): Flow<List<Representative>>
@@ -93,6 +107,7 @@ interface BorgRepository {
     suspend fun fetchBotConfig(): Pair<String, Boolean>
     suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean)
     suspend fun fetchBotLogs(): List<BotLog>
+    suspend fun fetchRepresentativeInquiryReports(): List<RepresentativeInquiryReport>
 }
 
 private const val SESSION_USER_ID_KEY = "session_user_id"
@@ -536,6 +551,31 @@ class OfflineFirstBorgRepository(
                 }
         } catch (throwable: Throwable) {
             Log.w("BorgBot", "Unable to fetch bot_logs from Supabase", throwable)
+            emptyList()
+        }
+    }
+
+    override suspend fun fetchRepresentativeInquiryReports(): List<RepresentativeInquiryReport> = withContext(Dispatchers.IO) {
+        try {
+            SupabaseClientProvider.client
+                .from("representative_portal_report")
+                .select()
+                .decodeList<RepresentativePortalReportDto>()
+                .sortedByDescending { it.lastSearchAt.orEmpty() }
+                .map { dto ->
+                    RepresentativeInquiryReport(
+                        representativeId = dto.representativeId,
+                        representativeName = dto.representativeName,
+                        representativePhone = dto.representativePhone,
+                        companyId = dto.companyId,
+                        companyName = dto.companyName,
+                        searchCount = dto.searchCount,
+                        firstSearchAt = dto.firstSearchAt?.take(16)?.replace("T", " ").orEmpty(),
+                        lastSearchAt = dto.lastSearchAt?.take(16)?.replace("T", " ").orEmpty(),
+                    )
+                }
+        } catch (throwable: Throwable) {
+            Log.w("BorgPortal", "Unable to fetch representative portal report", throwable)
             emptyList()
         }
     }

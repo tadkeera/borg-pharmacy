@@ -55,6 +55,18 @@ data class Representative(
     val deletedAt: Long? = null,
 )
 
+
+data class RepresentativeInquiryReport(
+    val representativeId: String,
+    val representativeName: String,
+    val representativePhone: String,
+    val companyId: String,
+    val companyName: String,
+    val searchCount: Int,
+    val firstSearchAt: String,
+    val lastSearchAt: String,
+)
+
 data class Visit(
     val id: String = UUID.randomUUID().toString(),
     val companyId: String,
