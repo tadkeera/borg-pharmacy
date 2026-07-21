@@ -34,7 +34,7 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
 private val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         listOf("companies", "representatives", "visits", "print_logs", "users", "app_settings").forEach { table ->
-            addColumnIfMissing(db, table, "tenantId", "ALTER TABLE $table ADD COLUMN tenantId TEXT NOT NULL DEFAULT '$DEFAULT_TENANT_ID'")
+            addColumnIfMissing(db, table, "tenantId", "ALTER TABLE $table ADD COLUMN tenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'")
             addColumnIfMissing(db, table, "syncStatus", "ALTER TABLE $table ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'SYNCED'")
             addColumnIfMissing(db, table, "isDeleted", "ALTER TABLE $table ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0")
         }

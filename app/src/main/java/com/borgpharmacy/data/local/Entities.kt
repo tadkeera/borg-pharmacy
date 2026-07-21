@@ -33,7 +33,7 @@ interface TenantScopedEntity {
 )
 data class CompanyEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000001'") override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val name: String,
     val tier: String = Tier.UNRATED.name,
     val baseDayIndex: Int? = null,
@@ -58,7 +58,7 @@ data class CompanyEntity(
 )
 data class RepresentativeEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000001'") override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val companyId: String,
     val name: String,
     val phone: String = "+967",
@@ -82,7 +82,7 @@ data class RepresentativeEntity(
 )
 data class VisitEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000001'") override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val companyId: String,
     val cycleStartEpochDay: Long,
     val dayOfCycle: Int,
@@ -119,7 +119,7 @@ data class VisitEntity(
 )
 data class PrintLogEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000001'") override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val repId: String,
     val visitId: String,
     val printedAt: Long = System.currentTimeMillis(),
@@ -131,7 +131,7 @@ data class PrintLogEntity(
 @Entity(tableName = "users", indices = [Index(value = ["username"], unique = true), Index("tenantId")])
 data class UserEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000001'") override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     val username: String,
     val displayName: String,
     val role: String,
@@ -148,7 +148,7 @@ data class UserEntity(
 data class AppSettingEntity(
     @PrimaryKey val key: String,
     val value: String,
-    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000001'") override val tenantId: String = DEFAULT_TENANT_ID,
+    @ColumnInfo(defaultValue = "'00000000-0000-0000-0000-000000000000'") override val tenantId: String = DEFAULT_TENANT_ID,
     @ColumnInfo(defaultValue = "0") override val updatedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "'SYNCED'") override val syncStatus: String = SyncStatus.PENDING.name,
     @ColumnInfo(defaultValue = "0") override val isDeleted: Boolean = false,
