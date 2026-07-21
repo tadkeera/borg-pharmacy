@@ -143,11 +143,17 @@ interface UserDao {
     @Query("SELECT * FROM users WHERE id = :userId AND active = 1 LIMIT 1")
     suspend fun getById(userId: String): UserEntity?
 
+    @Query("SELECT * FROM users ORDER BY username COLLATE NOCASE")
+    suspend fun listAll(): List<UserEntity>
+
     @Query("SELECT COUNT(*) FROM users")
     suspend fun count(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: UserEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entities: List<UserEntity>)
 
     @Query("UPDATE users SET passcodeHash = :passcodeHash, mustChangePasscode = 0, updatedAt = :updatedAt WHERE id = :userId")
     suspend fun changePasscode(userId: String, passcodeHash: String, updatedAt: Long = System.currentTimeMillis())

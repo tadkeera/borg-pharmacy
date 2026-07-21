@@ -444,7 +444,7 @@ private fun LockScreen(
     onLogin: (String, String) -> Unit,
     onChangeForcedPasscode: (String) -> Unit,
 ) {
-    var username by rememberSaveable { mutableStateOf("admin") }
+    var username by rememberSaveable { mutableStateOf("") }
     var passcode by rememberSaveable { mutableStateOf("") }
     var newPasscode by rememberSaveable { mutableStateOf("") }
     Box(
@@ -493,7 +493,7 @@ private fun LockScreen(
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgBlue),
                         modifier = Modifier.fillMaxWidth().height(50.dp)
                     ) { Text("دخول", color = Color.White, fontWeight = FontWeight.Bold) }
-                    Text("الكود الافتراضي للمدير: admin2026 ويجب تغييره فورًا عند أول دخول", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, color = Color.Gray)
+
                 } else {
                     Text("لأمان النظام يجب تغيير كود المدير الافتراضي الآن.", fontWeight = FontWeight.SemiBold, color = BorgRed)
                     OutlinedTextField(

@@ -302,6 +302,26 @@ $$;
 
 revoke execute on function public.borg_sync_token_valid(text) from public;
 
+-- جدول مستخدمي تطبيق Android ليتم توحيد حسابات المدير/الصيادلة بين كل الهواتف.
+create table if not exists public.users (
+  id uuid primary key,
+  username text not null unique,
+  display_name text not null,
+  role text not null check (role in ('ADMIN', 'PHARMACIST')),
+  passcode_hash text not null,
+  must_change_passcode boolean not null default false,
+  active boolean not null default true,
+  created_at bigint not null,
+  updated_at bigint not null
+);
+
+create index if not exists idx_users_active_username on public.users (lower(username)) where active = true;
+alter table public.users enable row level security;
+revoke select, insert, update, delete on table public.users from anon;
+
+drop policy if exists "borg_users_no_direct_anon" on public.users;
+-- لا توجد سياسة قراءة/كتابة مباشرة للـ anon على users. القراءة والكتابة تتم فقط عبر RPC محمية بالتوكن.
+
 create or replace function public.borg_sync_companies(p_token text, p_rows jsonb)
 returns void
 language plpgsql
@@ -437,9 +457,82 @@ begin
 end;
 $$;
 
+create or replace function public.borg_sync_users(p_token text, p_rows jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item jsonb;
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  if coalesce(jsonb_typeof(p_rows), '') <> 'array' then
+    raise exception 'p_rows must be a json array';
+  end if;
+
+  for item in select value from jsonb_array_elements(p_rows) loop
+    insert into public.users (
+      id, username, display_name, role, passcode_hash, must_change_passcode, active, created_at, updated_at
+    ) values (
+      (item->>'id')::uuid,
+      lower(trim(item->>'username')),
+      coalesce(nullif(trim(item->>'display_name'), ''), trim(item->>'username')),
+      case when item->>'role' = 'ADMIN' then 'ADMIN' else 'PHARMACIST' end,
+      item->>'passcode_hash',
+      coalesce((item->>'must_change_passcode')::boolean, false),
+      coalesce((item->>'active')::boolean, true),
+      coalesce((item->>'created_at')::bigint, (extract(epoch from now()) * 1000)::bigint),
+      coalesce((item->>'updated_at')::bigint, (extract(epoch from now()) * 1000)::bigint)
+    )
+    on conflict (username) do update set
+      display_name = excluded.display_name,
+      role = excluded.role,
+      passcode_hash = excluded.passcode_hash,
+      must_change_passcode = excluded.must_change_passcode,
+      active = excluded.active,
+      updated_at = excluded.updated_at
+    where public.users.updated_at <= excluded.updated_at;
+  end loop;
+end;
+$$;
+
+create or replace function public.borg_pull_users(p_token text)
+returns table (
+  id uuid,
+  username text,
+  display_name text,
+  role text,
+  passcode_hash text,
+  must_change_passcode boolean,
+  active boolean,
+  created_at bigint,
+  updated_at bigint
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  return query
+  select u.id, u.username, u.display_name, u.role, u.passcode_hash, u.must_change_passcode, u.active, u.created_at, u.updated_at
+  from public.users u
+  order by u.username;
+end;
+$$;
+
 grant execute on function public.borg_sync_companies(text, jsonb) to anon;
 grant execute on function public.borg_sync_representatives(text, jsonb) to anon;
 grant execute on function public.borg_sync_visits(text, jsonb) to anon;
+grant execute on function public.borg_sync_users(text, jsonb) to anon;
+grant execute on function public.borg_pull_users(text) to anon;
 
 create or replace view public.representative_portal_report
 with (security_invoker = true)

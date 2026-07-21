@@ -159,10 +159,20 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun login(username: String, passcode: String): UserAccount? {
-        val user = db.userDao().findByUsername(username.trim()) ?: return null
-        if (!SecurityHasher.verify(passcode, user.passcodeHash)) return null
-        if (!user.mustChangePasscode) saveSession(user.id)
-        return user.toDomain()
+        val cleanUsername = username.trim()
+        if (cleanUsername.isBlank() || passcode.isBlank()) return null
+
+        var user = db.userDao().findByUsername(cleanUsername)
+        if (user == null || !SecurityHasher.verify(passcode, user.passcodeHash)) {
+            // في هاتف جديد قد لا تكون حسابات المستخدمين قد سُحبت بعد من Supabase؛ نزامن ثم نعيد المحاولة مرة واحدة.
+            syncNow()
+            user = db.userDao().findByUsername(cleanUsername)
+        }
+
+        val validUser = user ?: return null
+        if (!SecurityHasher.verify(passcode, validUser.passcodeHash)) return null
+        if (!validUser.mustChangePasscode) saveSession(validUser.id)
+        return validUser.toDomain()
     }
 
     override suspend fun restoreSavedSession(): UserAccount? {
@@ -410,6 +420,7 @@ class OfflineFirstBorgRepository(
         val companies = db.companyDao().dirty()
         val reps = db.representativeDao().dirty()
         val visits = db.visitDao().dirty()
+        val users = db.userDao().listAll().filterNot { it.isUnchangedSeedAdmin() }
 
         // مهم: لا نوقف السحب من Supabase إذا فشلت إحدى عمليات الدفع.
         // في الإصدارات السابقة كان فشل دفع حذف مندوب واحد يمنع Pull بالكامل، لذلك لا تظهر المندوبون المسجلون من صفحة الويب داخل التطبيق.
@@ -434,6 +445,12 @@ class OfflineFirstBorgRepository(
             Log.w("BorgSync", "Visit push failed; continuing with pull", throwable)
         }
 
+        runCatching {
+            syncService.pushUsers(users)
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "User push failed; continuing with pull", throwable)
+        }
+
         val remote = runCatching { syncService.pullAll() }
             .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed; local cache remains authoritative", throwable) }
             .getOrNull()
@@ -452,6 +469,7 @@ class OfflineFirstBorgRepository(
             }
             if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
             if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
+            if (remote.users.isNotEmpty()) db.userDao().upsertAll(remote.users)
         }
 
         if (ensureCurrentCycleSchedule()) {
@@ -600,6 +618,11 @@ class OfflineFirstBorgRepository(
             emptyList()
         }
     }
+
+    private fun UserEntity.isUnchangedSeedAdmin(): Boolean =
+        username.equals("admin", ignoreCase = true) &&
+            mustChangePasscode &&
+            passcodeHash == SecurityHasher.hashPasscode("admin2026")
 
     private fun normalizePhone(input: String): String {
         val trimmed = input.trim().ifBlank { "+967" }

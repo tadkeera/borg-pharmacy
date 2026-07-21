@@ -68,11 +68,17 @@ class BorgAppViewModel(
     }
 
     fun login(username: String, passcode: String) = viewModelScope.launch {
-        val user = repository.login(username, passcode)
-        if (user == null) {
-            _state.update { it.copy(loginError = "اسم المستخدم أو كود التفعيل غير صحيح") }
-        } else {
-            _state.update { it.copy(currentUser = user, loginError = null, mustChangePasscodeUser = if (user.mustChangePasscode) user else null) }
+        try {
+            val user = repository.login(username, passcode)
+            if (user == null) {
+                _state.update { it.copy(loginError = "اسم المستخدم أو كود التفعيل غير صحيح") }
+            } else {
+                val forceChange = user.role == UserRole.ADMIN && user.mustChangePasscode
+                _state.update { it.copy(currentUser = user, loginError = null, mustChangePasscodeUser = if (forceChange) user else null) }
+            }
+        } catch (t: Throwable) {
+            Log.e("BorgLogin", "Login failed", t)
+            _state.update { it.copy(loginError = "تعذر تسجيل الدخول الآن. تأكد من الاتصال ثم حاول مرة أخرى") }
         }
     }
 

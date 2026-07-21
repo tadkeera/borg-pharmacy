@@ -209,7 +209,7 @@ fun UserEntity.toDomain(): UserAccount = UserAccount(
     id = id,
     username = username,
     displayName = displayName,
-    role = UserRole.valueOf(role),
+    role = runCatching { UserRole.valueOf(role) }.getOrDefault(UserRole.PHARMACIST),
     mustChangePasscode = mustChangePasscode,
     isActive = active,
 )
