@@ -16,6 +16,17 @@ alter table if exists public.companies enable row level security;
 alter table if exists public.visits enable row level security;
 alter table if exists public.representatives enable row level security;
 
+-- لأن مفتاح anon ظاهر داخل صفحة ويب عامة، يجب أيضاً إغلاق أي سياسات كتابة عامة موجودة على جداول البوت إن كانت منشأة.
+do $$
+begin
+  if to_regclass('public.bot_config') is not null then
+    execute 'alter table public.bot_config enable row level security';
+  end if;
+  if to_regclass('public.bot_logs') is not null then
+    execute 'alter table public.bot_logs enable row level security';
+  end if;
+end $$;
+
 -- إنشاء View باسم schedules بنفس أسماء الأعمدة المطلوبة في صفحة الويب.
 -- يعتمد على جدول visits الحالي في تطبيق Borg Pharmacy ويحوّل البيانات إلى شكل مناسب للعرض.
 create or replace view public.schedules
@@ -59,10 +70,31 @@ revoke insert, update, delete on table public.visits from anon;
 revoke insert, update, delete on table public.representatives from anon;
 revoke insert, update, delete on table public.schedules from anon;
 
+-- إغلاق كتابة anon على جداول البوت إن وجدت، لأن نفس مفتاح anon المنشور في الويب يستطيع الوصول لكل صلاحيات anon بالمشروع.
+do $$
+begin
+  if to_regclass('public.bot_config') is not null then
+    execute 'revoke insert, update, delete on table public.bot_config from anon';
+  end if;
+  if to_regclass('public.bot_logs') is not null then
+    execute 'revoke insert, update, delete on table public.bot_logs from anon';
+  end if;
+end $$;
+
 -- إزالة سياسات الكتابة العامة القديمة إن كانت موجودة، لأنها تسمح لأي حامل anon key بالتعديل.
 drop policy if exists "borg_companies_write" on public.companies;
 drop policy if exists "borg_visits_write" on public.visits;
 drop policy if exists "borg_reps_write" on public.representatives;
+
+do $$
+begin
+  if to_regclass('public.bot_config') is not null then
+    execute 'drop policy if exists "borg_bot_config_write" on public.bot_config';
+  end if;
+  if to_regclass('public.bot_logs') is not null then
+    execute 'drop policy if exists "borg_bot_logs_write" on public.bot_logs';
+  end if;
+end $$;
 
 -- سياسات القراءة للصفحة العامة.
 drop policy if exists "web_companies_select_readonly" on public.companies;
