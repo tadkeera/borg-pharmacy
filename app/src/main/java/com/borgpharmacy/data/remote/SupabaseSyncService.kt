@@ -133,6 +133,7 @@ data class RemoteSnapshot(
 @Serializable
 data class CompanyRemoteDto(
     val id: String,
+    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
     val name: String,
     val tier: String,
     @SerialName("base_day_index") val baseDayIndex: Int? = null,
@@ -140,22 +141,28 @@ data class CompanyRemoteDto(
     @SerialName("created_at") val createdAt: Long,
     @SerialName("updated_at") val updatedAt: Long,
     @SerialName("deleted_at") val deletedAt: Long?,
+    @SerialName("sync_status") val syncStatus: String = "SYNCED",
+    @SerialName("is_deleted") val isDeleted: Boolean = deletedAt != null,
 )
 
 @Serializable
 data class RepresentativeRemoteDto(
     val id: String,
+    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
     @SerialName("company_id") val companyId: String,
     val name: String,
     val phone: String,
     @SerialName("created_at") val createdAt: Long,
     @SerialName("updated_at") val updatedAt: Long,
     @SerialName("deleted_at") val deletedAt: Long?,
+    @SerialName("sync_status") val syncStatus: String = "SYNCED",
+    @SerialName("is_deleted") val isDeleted: Boolean = deletedAt != null,
 )
 
 @Serializable
 data class VisitRemoteDto(
     val id: String,
+    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
     @SerialName("company_id") val companyId: String,
     @SerialName("cycle_start_epoch_day") val cycleStartEpochDay: Long,
     @SerialName("day_of_cycle") val dayOfCycle: Int,
@@ -167,11 +174,14 @@ data class VisitRemoteDto(
     @SerialName("created_at") val createdAt: Long,
     @SerialName("updated_at") val updatedAt: Long,
     @SerialName("deleted_at") val deletedAt: Long?,
+    @SerialName("sync_status") val syncStatus: String = "SYNCED",
+    @SerialName("is_deleted") val isDeleted: Boolean = deletedAt != null,
 )
 
 @Serializable
 data class UserRemoteDto(
     val id: String,
+    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
     val username: String,
     @SerialName("display_name") val displayName: String,
     val role: String,
@@ -180,10 +190,13 @@ data class UserRemoteDto(
     val active: Boolean = true,
     @SerialName("created_at") val createdAt: Long,
     @SerialName("updated_at") val updatedAt: Long,
+    @SerialName("sync_status") val syncStatus: String = "SYNCED",
+    @SerialName("is_deleted") val isDeleted: Boolean = !active,
 )
 
 private fun CompanyEntity.toRemote() = CompanyRemoteDto(
     id = id,
+    tenantId = tenantId,
     name = name,
     tier = tier,
     baseDayIndex = baseDayIndex,
@@ -191,12 +204,14 @@ private fun CompanyEntity.toRemote() = CompanyRemoteDto(
     createdAt = createdAt,
     updatedAt = updatedAt,
     deletedAt = deletedAt,
+    syncStatus = syncStatus,
+    isDeleted = isDeleted,
 )
-private fun RepresentativeEntity.toRemote() = RepresentativeRemoteDto(id, companyId, name, phone, createdAt, updatedAt, deletedAt)
-private fun VisitEntity.toRemote() = VisitRemoteDto(id, companyId, cycleStartEpochDay, dayOfCycle, weekOfCycle, dateEpochDay, shift, slotIndex, status, createdAt, updatedAt, deletedAt)
-private fun UserEntity.toRemote() = UserRemoteDto(id, username, displayName, role, passcodeHash, mustChangePasscode, active, createdAt, updatedAt)
+private fun RepresentativeEntity.toRemote() = RepresentativeRemoteDto(id, tenantId, companyId, name, phone, createdAt, updatedAt, deletedAt, syncStatus, isDeleted)
+private fun VisitEntity.toRemote() = VisitRemoteDto(id, tenantId, companyId, cycleStartEpochDay, dayOfCycle, weekOfCycle, dateEpochDay, shift, slotIndex, status, createdAt, updatedAt, deletedAt, syncStatus, isDeleted)
+private fun UserEntity.toRemote() = UserRemoteDto(id, tenantId, username, displayName, role, passcodeHash, mustChangePasscode, active, createdAt, updatedAt, syncStatus, isDeleted)
 
-private fun CompanyRemoteDto.toEntity() = CompanyEntity(id = id, name = name, tier = tier, baseDayIndex = baseDayIndex, baseShift = baseShift, createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, dirty = false)
-private fun RepresentativeRemoteDto.toEntity() = RepresentativeEntity(id = id, companyId = companyId, name = name, phone = phone, createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, dirty = false)
-private fun VisitRemoteDto.toEntity() = VisitEntity(id = id, companyId = companyId, cycleStartEpochDay = cycleStartEpochDay, dayOfCycle = dayOfCycle, weekOfCycle = weekOfCycle, dateEpochDay = dateEpochDay, shift = shift, slotIndex = slotIndex, status = status, createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, dirty = false)
-private fun UserRemoteDto.toEntity() = UserEntity(id = id, username = username, displayName = displayName, role = role, passcodeHash = passcodeHash, mustChangePasscode = mustChangePasscode, active = active, createdAt = createdAt, updatedAt = updatedAt)
+private fun CompanyRemoteDto.toEntity() = CompanyEntity(id = id, tenantId = tenantId, name = name, tier = tier, baseDayIndex = baseDayIndex, baseShift = baseShift, createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, dirty = false, syncStatus = syncStatus, isDeleted = isDeleted)
+private fun RepresentativeRemoteDto.toEntity() = RepresentativeEntity(id = id, tenantId = tenantId, companyId = companyId, name = name, phone = phone, createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, dirty = false, syncStatus = syncStatus, isDeleted = isDeleted)
+private fun VisitRemoteDto.toEntity() = VisitEntity(id = id, tenantId = tenantId, companyId = companyId, cycleStartEpochDay = cycleStartEpochDay, dayOfCycle = dayOfCycle, weekOfCycle = weekOfCycle, dateEpochDay = dateEpochDay, shift = shift, slotIndex = slotIndex, status = status, createdAt = createdAt, updatedAt = updatedAt, deletedAt = deletedAt, dirty = false, syncStatus = syncStatus, isDeleted = isDeleted)
+private fun UserRemoteDto.toEntity() = UserEntity(id = id, tenantId = tenantId, username = username, displayName = displayName, role = role, passcodeHash = passcodeHash, mustChangePasscode = mustChangePasscode, active = active, createdAt = createdAt, updatedAt = updatedAt, syncStatus = syncStatus, isDeleted = isDeleted)

@@ -27,8 +27,8 @@ android {
         applicationId = "com.borgpharmacy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 38
-        versionName = "1.0.37"
+        versionCode = 39
+        versionName = "1.0.38"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -113,6 +113,7 @@ dependencies {
 
     implementation(platform("io.github.jan-tennert.supabase:bom:2.6.1"))
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:realtime-kt")
     implementation("io.github.jan-tennert.supabase:storage-kt")
     implementation("io.ktor:ktor-client-android:2.3.12")

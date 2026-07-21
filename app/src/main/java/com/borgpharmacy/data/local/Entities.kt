@@ -15,18 +15,35 @@ import com.borgpharmacy.domain.VisitStatus
 import java.time.LocalDate
 import java.util.UUID
 
-@Entity(tableName = "companies")
+const val DEFAULT_TENANT_ID: String = "00000000-0000-0000-0000-000000000000"
+
+enum class SyncStatus { PENDING, SYNCED, FAILED }
+
+interface TenantScopedEntity {
+    val tenantId: String
+    val updatedAt: Long
+    val syncStatus: String
+    val isDeleted: Boolean
+}
+
+@Entity(
+    tableName = "companies",
+    indices = [Index("tenantId"), Index(value = ["tenantId", "name"])],
+)
 data class CompanyEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    override val tenantId: String = DEFAULT_TENANT_ID,
     val name: String,
     val tier: String = Tier.UNRATED.name,
     val baseDayIndex: Int? = null,
     val baseShift: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
+    override val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
     val dirty: Boolean = true,
-)
+    override val syncStatus: String = SyncStatus.PENDING.name,
+    override val isDeleted: Boolean = deletedAt != null,
+) : TenantScopedEntity
 
 @Entity(
     tableName = "representatives",
@@ -36,18 +53,21 @@ data class CompanyEntity(
         childColumns = ["companyId"],
         onDelete = ForeignKey.CASCADE,
     )],
-    indices = [Index("companyId"), Index("phone")],
+    indices = [Index("tenantId"), Index("companyId"), Index("phone"), Index(value = ["tenantId", "phone"])],
 )
 data class RepresentativeEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    override val tenantId: String = DEFAULT_TENANT_ID,
     val companyId: String,
     val name: String,
     val phone: String = "+967",
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
+    override val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
     val dirty: Boolean = true,
-)
+    override val syncStatus: String = SyncStatus.PENDING.name,
+    override val isDeleted: Boolean = deletedAt != null,
+) : TenantScopedEntity
 
 @Entity(
     tableName = "visits",
@@ -57,10 +77,11 @@ data class RepresentativeEntity(
         childColumns = ["companyId"],
         onDelete = ForeignKey.CASCADE,
     )],
-    indices = [Index("companyId"), Index("cycleStartEpochDay"), Index("dateEpochDay"), Index("shift")],
+    indices = [Index("tenantId"), Index("companyId"), Index("cycleStartEpochDay"), Index("dateEpochDay"), Index("shift"), Index(value = ["tenantId", "updatedAt"])],
 )
 data class VisitEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    override val tenantId: String = DEFAULT_TENANT_ID,
     val companyId: String,
     val cycleStartEpochDay: Long,
     val dayOfCycle: Int,
@@ -70,10 +91,12 @@ data class VisitEntity(
     val slotIndex: Int,
     val status: String = VisitStatus.SCHEDULED.name,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
+    override val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
     val dirty: Boolean = true,
-)
+    override val syncStatus: String = SyncStatus.PENDING.name,
+    override val isDeleted: Boolean = deletedAt != null,
+) : TenantScopedEntity
 
 @Entity(
     tableName = "print_logs",
@@ -91,18 +114,23 @@ data class VisitEntity(
             onDelete = ForeignKey.CASCADE,
         ),
     ],
-    indices = [Index("repId"), Index("visitId")],
+    indices = [Index("tenantId"), Index("repId"), Index("visitId")],
 )
 data class PrintLogEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    override val tenantId: String = DEFAULT_TENANT_ID,
     val repId: String,
     val visitId: String,
     val printedAt: Long = System.currentTimeMillis(),
-)
+    override val updatedAt: Long = System.currentTimeMillis(),
+    override val syncStatus: String = SyncStatus.PENDING.name,
+    override val isDeleted: Boolean = false,
+) : TenantScopedEntity
 
-@Entity(tableName = "users", indices = [Index(value = ["username"], unique = true)])
+@Entity(tableName = "users", indices = [Index(value = ["username"], unique = true), Index("tenantId")])
 data class UserEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    override val tenantId: String = DEFAULT_TENANT_ID,
     val username: String,
     val displayName: String,
     val role: String,
@@ -110,14 +138,20 @@ data class UserEntity(
     val mustChangePasscode: Boolean = false,
     val active: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
-)
+    override val updatedAt: Long = System.currentTimeMillis(),
+    override val syncStatus: String = SyncStatus.PENDING.name,
+    override val isDeleted: Boolean = !active,
+) : TenantScopedEntity
 
-@Entity(tableName = "app_settings")
+@Entity(tableName = "app_settings", indices = [Index("tenantId")])
 data class AppSettingEntity(
     @PrimaryKey val key: String,
     val value: String,
-)
+    override val tenantId: String = DEFAULT_TENANT_ID,
+    override val updatedAt: Long = System.currentTimeMillis(),
+    override val syncStatus: String = SyncStatus.PENDING.name,
+    override val isDeleted: Boolean = false,
+) : TenantScopedEntity
 
 data class PrintCountTuple(
     val repId: String,
@@ -138,11 +172,12 @@ fun CompanyEntity.toDomain(): Company = Company(
     baseShift = baseShift?.let { runCatching { Shift.valueOf(it) }.getOrNull() },
     createdAt = createdAt,
     updatedAt = updatedAt,
-    deletedAt = deletedAt,
+    deletedAt = deletedAt ?: if (isDeleted) updatedAt else null,
 )
 
-fun Company.toEntity(dirty: Boolean = true): CompanyEntity = CompanyEntity(
+fun Company.toEntity(dirty: Boolean = true, tenantId: String = DEFAULT_TENANT_ID): CompanyEntity = CompanyEntity(
     id = id,
+    tenantId = tenantId,
     name = name.cleanCompanyName(),
     tier = tier.name,
     baseDayIndex = baseDayIndex,
@@ -151,6 +186,8 @@ fun Company.toEntity(dirty: Boolean = true): CompanyEntity = CompanyEntity(
     updatedAt = updatedAt,
     deletedAt = deletedAt,
     dirty = dirty,
+    syncStatus = if (dirty) SyncStatus.PENDING.name else SyncStatus.SYNCED.name,
+    isDeleted = deletedAt != null,
 )
 
 fun RepresentativeEntity.toDomain(): Representative = Representative(
@@ -160,11 +197,12 @@ fun RepresentativeEntity.toDomain(): Representative = Representative(
     phone = phone,
     createdAt = createdAt,
     updatedAt = updatedAt,
-    deletedAt = deletedAt,
+    deletedAt = deletedAt ?: if (isDeleted) updatedAt else null,
 )
 
-fun Representative.toEntity(dirty: Boolean = true): RepresentativeEntity = RepresentativeEntity(
+fun Representative.toEntity(dirty: Boolean = true, tenantId: String = DEFAULT_TENANT_ID): RepresentativeEntity = RepresentativeEntity(
     id = id,
+    tenantId = tenantId,
     companyId = companyId,
     name = name.trim(),
     phone = phone.ifBlank { "+967" },
@@ -172,6 +210,8 @@ fun Representative.toEntity(dirty: Boolean = true): RepresentativeEntity = Repre
     updatedAt = updatedAt,
     deletedAt = deletedAt,
     dirty = dirty,
+    syncStatus = if (dirty) SyncStatus.PENDING.name else SyncStatus.SYNCED.name,
+    isDeleted = deletedAt != null,
 )
 
 fun VisitEntity.toDomain(): Visit = Visit(
@@ -186,11 +226,12 @@ fun VisitEntity.toDomain(): Visit = Visit(
     status = VisitStatus.valueOf(status),
     createdAt = createdAt,
     updatedAt = updatedAt,
-    deletedAt = deletedAt,
+    deletedAt = deletedAt ?: if (isDeleted) updatedAt else null,
 )
 
-fun Visit.toEntity(dirty: Boolean = true): VisitEntity = VisitEntity(
+fun Visit.toEntity(dirty: Boolean = true, tenantId: String = DEFAULT_TENANT_ID): VisitEntity = VisitEntity(
     id = id,
+    tenantId = tenantId,
     companyId = companyId,
     cycleStartEpochDay = cycleStartEpochDay,
     dayOfCycle = dayOfCycle,
@@ -203,6 +244,8 @@ fun Visit.toEntity(dirty: Boolean = true): VisitEntity = VisitEntity(
     updatedAt = updatedAt,
     deletedAt = deletedAt,
     dirty = dirty,
+    syncStatus = if (dirty) SyncStatus.PENDING.name else SyncStatus.SYNCED.name,
+    isDeleted = deletedAt != null,
 )
 
 fun UserEntity.toDomain(): UserAccount = UserAccount(
@@ -211,7 +254,7 @@ fun UserEntity.toDomain(): UserAccount = UserAccount(
     displayName = displayName,
     role = runCatching { UserRole.valueOf(role) }.getOrDefault(UserRole.PHARMACIST),
     mustChangePasscode = mustChangePasscode,
-    isActive = active,
+    isActive = active && !isDeleted,
 )
 
 private fun String.cleanCompanyName(): String = trim()
