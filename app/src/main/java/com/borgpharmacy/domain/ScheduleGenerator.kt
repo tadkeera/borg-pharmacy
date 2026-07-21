@@ -101,11 +101,14 @@ class ScheduleGenerator(
             val current = visitsForCompany(company.id)
             val baseCell = company.lockedBaseCellOrNull() ?: lockedBaseCellForCompany(company.id) ?: chooseLeastLoadedBaseCell()
             val desired = (1..4).map { week -> createVisit(company.id, baseCell, week) }
-            val desiredKeys = desired.map { visitKey(it) }.toSet()
-            val currentKeys = current.map { visitKey(it) }.toSet()
+            val desiredIds = desired.map { it.id }.toSet()
 
-            val deletes = current.filter { visitKey(it) !in desiredKeys }
-            val upserts = desired.filter { visitKey(it) !in currentKeys }
+            // الإصلاح الجذري: أي زيارة لا تحمل الـ stable id الصحيح للأسبوع تُحذف.
+            // هذا يزيل الزيارات القديمة/المكررة التي ظهرت أثناء انتقال Multi-Tenant، حتى لو كانت بنفس التاريخ والفترة.
+            val deletes = current.filter { it.id !in desiredIds }
+            val upserts = desired.filter { desiredVisit ->
+                current.none { existing -> existing.id == desiredVisit.id && visitKey(existing) == visitKey(desiredVisit) }
+            }
 
             deletes.forEach { removed ->
                 inferBaseCell(removed)?.let { cell -> grid[cell]?.removeAll { it.id == removed.id } }

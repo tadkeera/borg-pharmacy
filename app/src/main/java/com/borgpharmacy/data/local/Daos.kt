@@ -8,15 +8,15 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CompanyDao {
-    @Query("SELECT * FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 ORDER BY name COLLATE NOCASE")
+    @Query("SELECT * FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL ORDER BY name COLLATE NOCASE")
     fun observeActiveForTenant(tenantId: String): Flow<List<CompanyEntity>>
     fun observeActive(): Flow<List<CompanyEntity>> = observeActiveForTenant(DEFAULT_TENANT_ID)
 
-    @Query("SELECT * FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 ORDER BY name COLLATE NOCASE")
+    @Query("SELECT * FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL ORDER BY name COLLATE NOCASE")
     suspend fun listActiveForTenant(tenantId: String): List<CompanyEntity>
     suspend fun listActive(): List<CompanyEntity> = listActiveForTenant(DEFAULT_TENANT_ID)
 
-    @Query("SELECT * FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND name LIKE '%' || :query || '%' ORDER BY name COLLATE NOCASE LIMIT 50")
+    @Query("SELECT * FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND name LIKE '%' || :query || '%' ORDER BY name COLLATE NOCASE LIMIT 50")
     suspend fun searchForTenant(tenantId: String, query: String): List<CompanyEntity>
     suspend fun search(query: String): List<CompanyEntity> = searchForTenant(DEFAULT_TENANT_ID, query)
 
@@ -58,18 +58,18 @@ interface CompanyDao {
     @Query("UPDATE companies SET syncStatus = 'FAILED' WHERE id IN (:ids)")
     suspend fun markFailed(ids: List<String>)
 
-    @Query("SELECT tier, COUNT(*) AS count FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 GROUP BY tier")
+    @Query("SELECT tier, COUNT(*) AS count FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL GROUP BY tier")
     fun observeTierCountsForTenant(tenantId: String): Flow<List<TierCountTuple>>
     fun observeTierCounts(): Flow<List<TierCountTuple>> = observeTierCountsForTenant(DEFAULT_TENANT_ID)
 }
 
 @Dao
 interface RepresentativeDao {
-    @Query("SELECT * FROM representatives WHERE tenantId = :tenantId AND isDeleted = 0 ORDER BY name COLLATE NOCASE")
+    @Query("SELECT * FROM representatives WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND companyId IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL) ORDER BY name COLLATE NOCASE")
     fun observeActiveForTenant(tenantId: String): Flow<List<RepresentativeEntity>>
     fun observeActive(): Flow<List<RepresentativeEntity>> = observeActiveForTenant(DEFAULT_TENANT_ID)
 
-    @Query("SELECT * FROM representatives WHERE tenantId = :tenantId AND companyId = :companyId AND isDeleted = 0 ORDER BY name COLLATE NOCASE")
+    @Query("SELECT * FROM representatives WHERE tenantId = :tenantId AND companyId = :companyId AND isDeleted = 0 AND deletedAt IS NULL ORDER BY name COLLATE NOCASE")
     fun observeForCompanyAndTenant(tenantId: String, companyId: String): Flow<List<RepresentativeEntity>>
     fun observeForCompany(companyId: String): Flow<List<RepresentativeEntity>> = observeForCompanyAndTenant(DEFAULT_TENANT_ID, companyId)
 
@@ -102,19 +102,19 @@ interface RepresentativeDao {
 
 @Dao
 interface VisitDao {
-    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 ORDER BY dateEpochDay, shift, slotIndex")
+    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND companyId IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL) ORDER BY dateEpochDay, shift, slotIndex")
     fun observeActiveForTenant(tenantId: String): Flow<List<VisitEntity>>
     fun observeActive(): Flow<List<VisitEntity>> = observeActiveForTenant(DEFAULT_TENANT_ID)
 
-    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND cycleStartEpochDay = :cycleStartEpochDay ORDER BY dateEpochDay, shift, slotIndex")
+    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND cycleStartEpochDay = :cycleStartEpochDay AND companyId IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL) ORDER BY dateEpochDay, shift, slotIndex")
     fun observeCycleForTenant(tenantId: String, cycleStartEpochDay: Long): Flow<List<VisitEntity>>
     fun observeCycle(cycleStartEpochDay: Long): Flow<List<VisitEntity>> = observeCycleForTenant(DEFAULT_TENANT_ID, cycleStartEpochDay)
 
-    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND dateEpochDay = :dateEpochDay ORDER BY shift, slotIndex")
+    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND dateEpochDay = :dateEpochDay AND companyId IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL) ORDER BY shift, slotIndex")
     fun observeDateForTenant(tenantId: String, dateEpochDay: Long): Flow<List<VisitEntity>>
     fun observeDate(dateEpochDay: Long): Flow<List<VisitEntity>> = observeDateForTenant(DEFAULT_TENANT_ID, dateEpochDay)
 
-    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND companyId = :companyId ORDER BY cycleStartEpochDay, dateEpochDay, shift, slotIndex")
+    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND companyId = :companyId ORDER BY cycleStartEpochDay, dateEpochDay, shift, slotIndex")
     fun observeItineraryForTenant(tenantId: String, companyId: String): Flow<List<VisitEntity>>
     fun observeItinerary(companyId: String): Flow<List<VisitEntity>> = observeItineraryForTenant(DEFAULT_TENANT_ID, companyId)
 
@@ -122,11 +122,11 @@ interface VisitDao {
     suspend fun dirtyForTenant(tenantId: String): List<VisitEntity>
     suspend fun dirty(): List<VisitEntity> = dirtyForTenant(DEFAULT_TENANT_ID)
 
-    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND cycleStartEpochDay = :cycleStartEpochDay")
+    @Query("SELECT * FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND cycleStartEpochDay = :cycleStartEpochDay AND companyId IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL)")
     suspend fun listCycleForTenant(tenantId: String, cycleStartEpochDay: Long): List<VisitEntity>
     suspend fun listCycle(cycleStartEpochDay: Long): List<VisitEntity> = listCycleForTenant(DEFAULT_TENANT_ID, cycleStartEpochDay)
 
-    @Query("SELECT MAX(cycleStartEpochDay) FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND cycleStartEpochDay < :cycleStartEpochDay")
+    @Query("SELECT MAX(cycleStartEpochDay) FROM visits WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND cycleStartEpochDay < :cycleStartEpochDay AND companyId IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL)")
     suspend fun latestCycleBeforeForTenant(tenantId: String, cycleStartEpochDay: Long): Long?
     suspend fun latestCycleBefore(cycleStartEpochDay: Long): Long? = latestCycleBeforeForTenant(DEFAULT_TENANT_ID, cycleStartEpochDay)
 

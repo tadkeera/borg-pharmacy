@@ -50,6 +50,7 @@ private val MIGRATION_1_5 = object : Migration(1, 5) { override fun migrate(db: 
 private val MIGRATION_2_5 = object : Migration(2, 5) { override fun migrate(db: SupportSQLiteDatabase) = rebuildTenantSchema(db) }
 private val MIGRATION_3_5 = object : Migration(3, 5) { override fun migrate(db: SupportSQLiteDatabase) = rebuildTenantSchema(db) }
 private val MIGRATION_4_5 = object : Migration(4, 5) { override fun migrate(db: SupportSQLiteDatabase) = rebuildTenantSchema(db) }
+private val MIGRATION_5_6 = object : Migration(5, 6) { override fun migrate(db: SupportSQLiteDatabase) = repairDeletedAndOrphanScheduleRows(db) }
 
 private fun addTenantSyncColumns(db: SupportSQLiteDatabase) {
     listOf("companies", "representatives", "visits", "print_logs", "users", "app_settings").forEach { table ->
@@ -256,6 +257,38 @@ private fun isDeletedExpr(db: SupportSQLiteDatabase, table: String): String = wh
     else -> "0"
 }
 
+private fun repairDeletedAndOrphanScheduleRows(db: SupportSQLiteDatabase) {
+    if (tableExists(db, "companies")) {
+        db.execSQL("UPDATE companies SET isDeleted = 1 WHERE deletedAt IS NOT NULL")
+    }
+    if (tableExists(db, "representatives")) {
+        db.execSQL("UPDATE representatives SET isDeleted = 1 WHERE deletedAt IS NOT NULL")
+        db.execSQL("""
+            UPDATE representatives
+            SET isDeleted = 1,
+                deletedAt = COALESCE(deletedAt, updatedAt),
+                syncStatus = 'PENDING',
+                dirty = 1
+            WHERE companyId NOT IN (
+                SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL
+            )
+        """.trimIndent())
+    }
+    if (tableExists(db, "visits")) {
+        db.execSQL("UPDATE visits SET isDeleted = 1 WHERE deletedAt IS NOT NULL")
+        db.execSQL("""
+            UPDATE visits
+            SET isDeleted = 1,
+                deletedAt = COALESCE(deletedAt, updatedAt),
+                syncStatus = 'PENDING',
+                dirty = 1
+            WHERE companyId NOT IN (
+                SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL
+            )
+        """.trimIndent())
+    }
+}
+
 private fun createRoomIndices(db: SupportSQLiteDatabase) {
     db.execSQL("CREATE INDEX IF NOT EXISTS index_companies_tenantId ON companies(tenantId)")
     db.execSQL("CREATE INDEX IF NOT EXISTS index_companies_tenantId_name ON companies(tenantId, name)")
@@ -301,7 +334,7 @@ private fun columnExists(db: SupportSQLiteDatabase, table: String, column: Strin
 class AppContainer(private val application: Application) {
     val database: BorgDatabase by lazy {
         Room.databaseBuilder(application, BorgDatabase::class.java, BorgDatabase.DATABASE_NAME)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_1_5, MIGRATION_2_5, MIGRATION_3_5, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_1_5, MIGRATION_2_5, MIGRATION_3_5, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
 

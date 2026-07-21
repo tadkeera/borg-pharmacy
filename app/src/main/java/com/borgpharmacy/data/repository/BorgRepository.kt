@@ -135,6 +135,9 @@ class OfflineFirstBorgRepository(
         backupService.ensureDirectories()
         seedDefaultAdmin()
         val start = cycleStart()
+        // إصلاح محلي فوري قبل ظهور الواجهة: يمنع عرض زيارات يتيمة أو مكررة بعد ترقيات المزامنة.
+        runCatching { ensureCurrentCycleSchedule() }
+            .onFailure { throwable -> Log.w("BorgInit", "Initial local schedule repair failed", throwable) }
         scope.launch { syncNow() }
         return start
     }
