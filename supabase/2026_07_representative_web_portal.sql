@@ -27,6 +27,35 @@ begin
   end if;
 end $$;
 
+-- دالة تطبيع أسماء الشركات لاستخدامها في إزالة التكرار على مستوى قاعدة البيانات أيضاً.
+create or replace function public.web_normalize_company_name(input text)
+returns text
+language sql
+immutable
+as $$
+  select trim(regexp_replace(
+    replace(replace(replace(replace(replace(replace(replace(replace(lower(coalesce(input,'')), 'أ','ا'), 'إ','ا'), 'آ','ا'), 'ٱ','ا'), 'ى','ي'), 'ئ','ي'), 'ؤ','و'), 'ة','ه'),
+    '["''`´‘’“”\\(\\)\\[\\]\\{\\}،,\\.:;؛!؟?\\-_\\/\\\\|]+',
+    ' ',
+    'g'
+  ));
+$$;
+
+-- View اختياري يعرض الشركات النشطة فقط بدون تكرار حسب الاسم بعد التطبيع.
+-- يفيد أي صفحة ويب عامة حتى لا تظهر نفس الشركة أكثر من مرة بسبب سجلات محذوفة/قديمة أو تكرار نشط.
+create or replace view public.representative_companies
+with (security_invoker = true)
+as
+select
+  public.web_normalize_company_name(c.name) as company_key,
+  (array_agg(trim(both ' "' from c.name) order by c.updated_at desc))[1] as company_name,
+  array_agg(c.id order by c.updated_at desc) as company_ids,
+  count(*)::integer as active_row_count
+from public.companies c
+where c.deleted_at is null
+  and public.web_normalize_company_name(c.name) <> ''
+group by public.web_normalize_company_name(c.name);
+
 -- إنشاء View باسم schedules بنفس أسماء الأعمدة المطلوبة في صفحة الويب.
 -- يعتمد على جدول visits الحالي في تطبيق Borg Pharmacy ويحوّل البيانات إلى شكل مناسب للعرض.
 create or replace view public.schedules
@@ -62,6 +91,7 @@ where v.deleted_at is null
 grant usage on schema public to anon;
 grant select on table public.companies to anon;
 grant select on table public.visits to anon;
+grant select on table public.representative_companies to anon;
 grant select on table public.schedules to anon;
 
 -- منع insert/update/delete من anon على جداول بيانات التطبيق الأساسية المستخدمة في صفحة الويب.

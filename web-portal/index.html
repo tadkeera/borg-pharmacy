@@ -325,7 +325,7 @@
 
     /** منع أحرف wildcard غير المرغوبة داخل ilike قدر الإمكان. */
     function cleanSearchTerm(value) {
-      return String(value ?? "").trim().replace(/[\\%_]/g, " ").replace(/\s+/g, " ");
+      return cleanCompanyName(value).replace(/[\%_]/g, " ").replace(/\s+/g, " ").trim();
     }
 
     function showStatus(type, html) {
@@ -370,37 +370,119 @@
       return cleanCompanyName(row?.name ?? row?.company_name ?? row?.[companyNameColumn] ?? "");
     }
 
+    function companyKey(value) {
+      return normalizeArabic(cleanCompanyName(value));
+    }
+
+    function uniqueValues(values) {
+      return [...new Set((values || []).filter(Boolean))];
+    }
+
+    function buildCompanySearchTerms(term) {
+      const cleaned = cleanSearchTerm(term);
+      const withoutDashes = cleaned.replace(/[-–—]+/g, " ").replace(/\s+/g, " ").trim();
+      const words = withoutDashes.split(" ").filter(word => word.length >= 3);
+      return uniqueValues([
+        cleaned,
+        withoutDashes,
+        words.slice(0, 2).join(" "),
+        words[0]
+      ]).filter(value => value.length >= 3);
+    }
+
+    function mergeAndDedupeCompanies(rows, typedTerm) {
+      const typedKey = companyKey(typedTerm);
+      const groups = new Map();
+
+      (rows || []).forEach(row => {
+        // لا نعرض السجلات المحذوفة حتى لو أعادتها سياسة قديمة في Supabase.
+        if (row.deleted_at !== undefined && row.deleted_at !== null) return;
+
+        const name = getCompanyDisplayName(row);
+        const key = companyKey(name);
+        if (!row.id || !name || !key) return;
+
+        if (typedKey && !(key.includes(typedKey) || typedKey.includes(key))) return;
+
+        const existing = groups.get(key);
+        if (existing) {
+          existing.ids = uniqueValues([...existing.ids, row.id]);
+          existing.duplicateRows += 1;
+        } else {
+          groups.set(key, {
+            id: row.id,
+            ids: [row.id],
+            name,
+            key,
+            duplicateRows: 1
+          });
+        }
+      });
+
+      return [...groups.values()]
+        .sort((a, b) => a.name.localeCompare(b.name, "ar"))
+        .slice(0, 8);
+    }
+
     async function queryCompaniesByColumn(column, term) {
-      return db
+      // الأهم هنا: فلترة deleted_at = null حتى لا تظهر الشركات المحذوفة/القديمة في القائمة.
+      let response = await db
         .from("companies")
-        .select(`id, ${column}`)
+        .select(`id, ${column}, deleted_at, updated_at`)
         .ilike(column, `%${term}%`)
-        .limit(8);
+        .is("deleted_at", null)
+        .order(column, { ascending: true })
+        .limit(50);
+
+      // توافق احتياطي لو كانت قاعدة أخرى لا تحتوي deleted_at/updated_at.
+      if (response.error && /deleted_at|updated_at/i.test(response.error.message || "")) {
+        response = await db
+          .from("companies")
+          .select(`id, ${column}`)
+          .ilike(column, `%${term}%`)
+          .order(column, { ascending: true })
+          .limit(50);
+      }
+
+      return response;
     }
 
     /**
      * الإكمال التلقائي:
      * يبحث في جدول companies عند إدخال 3 أحرف أو أكثر.
-     * يدعم عمود name المستخدم في التطبيق الحالي، ويجرب company_name تلقائياً إذا كان هو الموجود بقاعدتك.
+     * يتم حذف التكرار جذرياً عبر:
+     * 1) استبعاد deleted_at من Supabase.
+     * 2) دمج أي سجلات نشطة تحمل نفس الاسم بعد تنظيف علامات التنصيص والفواصل.
+     * 3) حفظ كل IDs المدمجة لاستخدامها عند جلب الزيارات، حتى لا تضيع الزيارات لو كانت مرتبطة بأحد السجلات المتكررة.
      */
     async function fetchCompanySuggestions(term) {
-      let response = await queryCompaniesByColumn("name", term);
+      const searchTerms = buildCompanySearchTerms(term);
+      const collectedRows = [];
+      let lastError = null;
 
-      if (response.error) {
-        const fallback = await queryCompaniesByColumn("company_name", term);
-        if (!fallback.error) {
-          companyNameColumn = "company_name";
-          response = fallback;
+      for (const searchTerm of searchTerms) {
+        let response = await queryCompaniesByColumn("name", searchTerm);
+
+        if (response.error) {
+          const fallback = await queryCompaniesByColumn("company_name", searchTerm);
+          if (!fallback.error) {
+            companyNameColumn = "company_name";
+            response = fallback;
+          }
+        } else {
+          companyNameColumn = "name";
         }
-      } else {
-        companyNameColumn = "name";
+
+        if (response.error) {
+          lastError = response.error;
+          continue;
+        }
+
+        collectedRows.push(...(response.data || []));
       }
 
-      if (response.error) throw response.error;
-
-      return (response.data || [])
-        .map(row => ({ id: row.id, name: getCompanyDisplayName(row) }))
-        .filter(company => company.id && company.name);
+      if (!collectedRows.length && lastError) throw lastError;
+      return mergeAndDedupeCompanies(collectedRows, term);
     }
 
     function renderSuggestions(companies) {
@@ -493,24 +575,53 @@
       return value || "غير محدد";
     }
 
+    function sortSchedules(schedules) {
+      const shiftRank = value => {
+        const shift = String(value ?? "").toUpperCase();
+        if (shift.includes("صباحية") || shift === "MORNING") return 1;
+        if (shift.includes("مسائية") || shift === "EVENING") return 2;
+        return 3;
+      };
+
+      return [...schedules].sort((a, b) =>
+        Number(a.weekNumber || 0) - Number(b.weekNumber || 0) ||
+        String(a.date || "").localeCompare(String(b.date || "")) ||
+        shiftRank(a.shiftTime) - shiftRank(b.shiftTime)
+      );
+    }
+
+    function dedupeSchedules(schedules) {
+      const unique = new Map();
+      (schedules || []).forEach(row => {
+        const key = [row.weekNumber, row.dayName, row.date, row.shiftTime].join("|");
+        if (!unique.has(key)) unique.set(key, row);
+      });
+      return sortSchedules([...unique.values()]);
+    }
+
     /**
      * محاولة جلب المواعيد من جدول/عرض schedules بالتنسيق المطلوب في المهمة.
      * إذا لم يكن schedules موجوداً، يتم الرجوع تلقائياً إلى جدول visits المستخدم في تطبيق Borg Pharmacy الحالي.
      */
     async function fetchSchedules(company) {
+      const companyIds = uniqueValues(company?.ids?.length ? company.ids : [company?.id]);
+      if (!companyIds.length) return [];
+
       const schedulesResponse = await db
         .from("schedules")
-        .select("week_number, day_name, date, shift_time, company_id, company_name")
-        .eq("company_id", company.id)
-        .order("week_number", { ascending: true });
+        .select("week_number, day_name, date, shift_time, company_id, company_name, slot_index")
+        .in("company_id", companyIds)
+        .order("week_number", { ascending: true })
+        .order("date", { ascending: true })
+        .order("slot_index", { ascending: true });
 
       if (!schedulesResponse.error) {
-        return (schedulesResponse.data || []).map(row => ({
+        return dedupeSchedules((schedulesResponse.data || []).map(row => ({
           weekNumber: row.week_number,
           dayName: row.day_name,
           date: row.date,
           shiftTime: row.shift_time
-        }));
+        })));
       }
 
       console.warn("schedules table/view unavailable; falling back to visits table:", schedulesResponse.error.message);
@@ -518,7 +629,7 @@
       let visitsResponse = await db
         .from("visits")
         .select("week_of_cycle, day_of_cycle, date_epoch_day, shift, slot_index, deleted_at")
-        .eq("company_id", company.id)
+        .in("company_id", companyIds)
         .is("deleted_at", null)
         .order("week_of_cycle", { ascending: true })
         .order("day_of_cycle", { ascending: true })
@@ -529,7 +640,7 @@
         visitsResponse = await db
           .from("visits")
           .select("week_of_cycle, day_of_cycle, date_epoch_day, shift, slot_index")
-          .eq("company_id", company.id)
+          .in("company_id", companyIds)
           .order("week_of_cycle", { ascending: true })
           .order("day_of_cycle", { ascending: true })
           .order("slot_index", { ascending: true });
@@ -537,23 +648,24 @@
 
       if (visitsResponse.error) throw visitsResponse.error;
 
-      return (visitsResponse.data || []).map(row => ({
+      return dedupeSchedules((visitsResponse.data || []).map(row => ({
         weekNumber: row.week_of_cycle,
         dayName: dayNameFromEpochDay(row.date_epoch_day),
         date: formatEpochDay(row.date_epoch_day),
         shiftTime: shiftLabel(row.shift)
-      }));
+      })));
     }
 
     async function resolveCompanyFromInput(term) {
-      if (selectedCompany && normalizeArabic(selectedCompany.name) === normalizeArabic(term)) {
+      const typedKey = companyKey(term);
+      if (selectedCompany && selectedCompany.key === typedKey) {
         return selectedCompany;
       }
 
       const companies = await fetchCompanySuggestions(term);
       if (!companies.length) return null;
 
-      return companies.find(company => normalizeArabic(company.name) === normalizeArabic(term)) || companies[0];
+      return companies.find(company => company.key === typedKey) || companies[0];
     }
 
     function renderResults(company, schedules) {
