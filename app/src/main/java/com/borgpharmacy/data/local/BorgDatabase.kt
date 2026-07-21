@@ -12,7 +12,7 @@ import androidx.room.RoomDatabase
         UserEntity::class,
         AppSettingEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class BorgDatabase : RoomDatabase() {
