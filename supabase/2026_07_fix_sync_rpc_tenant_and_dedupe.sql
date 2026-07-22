@@ -475,4 +475,64 @@ $$;
 
 grant execute on function public.borg_pull_users(text, uuid) to anon;
 
+
+-- 6) Repair representatives that are linked to an old duplicate company id.
+-- This is the critical fix when companies were deleted/imported and received new IDs.
+drop function if exists public.borg_repair_representative_company_links(text, uuid);
+create function public.borg_repair_representative_company_links(p_token text, p_tenant_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now bigint := (extract(epoch from now()) * 1000)::bigint;
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  -- Ensure every representative inherits tenant from its current company first.
+  update public.representatives r
+  set tenant_id = coalesce(c.tenant_id, p_tenant_id),
+      updated_at = greatest(r.updated_at, v_now),
+      sync_status = 'SYNCED'
+  from public.companies c
+  where r.company_id = c.id
+    and (r.tenant_id is null or r.tenant_id is distinct from coalesce(c.tenant_id, p_tenant_id));
+
+  -- If a representative points to an old/deleted duplicate company, move him to the active canonical company with the same normalized name.
+  with rep_map as (
+    select
+      r.id as rep_id,
+      canonical.id as new_company_id,
+      canonical.tenant_id as new_tenant_id
+    from public.representatives r
+    join public.companies old_company on old_company.id = r.company_id
+    join lateral (
+      select c.id, c.tenant_id
+      from public.companies c
+      where coalesce(c.tenant_id, p_tenant_id) = p_tenant_id
+        and c.deleted_at is null
+        and coalesce(c.is_deleted, false) = false
+        and public.web_normalize_company_name(c.name) = public.web_normalize_company_name(old_company.name)
+      order by c.updated_at desc, c.created_at desc, c.id
+      limit 1
+    ) canonical on true
+    where r.deleted_at is null
+      and coalesce(r.is_deleted, false) = false
+      and (r.company_id is distinct from canonical.id or r.tenant_id is distinct from canonical.tenant_id)
+  )
+  update public.representatives r
+  set company_id = rep_map.new_company_id,
+      tenant_id = rep_map.new_tenant_id,
+      updated_at = v_now,
+      sync_status = 'SYNCED'
+  from rep_map
+  where r.id = rep_map.rep_id;
+end;
+$$;
+
+grant execute on function public.borg_repair_representative_company_links(text, uuid) to anon;
+
 commit;

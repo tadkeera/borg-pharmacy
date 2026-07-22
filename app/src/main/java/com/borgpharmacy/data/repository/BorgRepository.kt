@@ -606,6 +606,12 @@ class OfflineFirstBorgRepository(
             }
         }
 
+        runCatching {
+            syncService.repairRepresentativeCompanyLinks(activeTenantId)
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Representative company link repair failed", throwable)
+        }
+
         val remote = runCatching { syncService.pullAll(activeTenantId) }
             .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed; local cache remains authoritative", throwable) }
             .getOrNull()

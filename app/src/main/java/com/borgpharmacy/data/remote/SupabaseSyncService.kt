@@ -142,6 +142,17 @@ class SupabaseSyncService {
         )
     }
 
+    suspend fun repairRepresentativeCompanyLinks(tenantId: String) {
+        postRpc(
+            functionName = "borg_repair_representative_company_links",
+            body = buildJsonObject {
+                put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+                put("p_tenant_id", tenantId)
+            },
+            preferReturnMinimal = true,
+        )
+    }
+
     private suspend fun pullUsers(tenantId: String): List<UserEntity> {
         val response = postRpc(
             functionName = "borg_pull_users",
