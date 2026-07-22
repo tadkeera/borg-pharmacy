@@ -201,6 +201,40 @@ begin
     raise exception 'p_company_ids must be a json array';
   end if;
 
+  -- قبل حذف الشركات القديمة، انقل أي مندوب نشط من company_id قديم إلى company_id الجديد
+  -- المطابق له بالاسم ضمن قائمة الشركات التي أرسلها التطبيق بعد استيراد CSV.
+  with keep(id) as (
+    select value::uuid from jsonb_array_elements_text(p_company_ids)
+  ), rep_map as (
+    select
+      r.id as rep_id,
+      canonical.id as new_company_id,
+      canonical.tenant_id as new_tenant_id
+    from public.representatives r
+    join public.companies old_company on old_company.id = r.company_id
+    join lateral (
+      select c.id, c.tenant_id
+      from public.companies c
+      join keep k on k.id = c.id
+      where coalesce(c.tenant_id, p_tenant_id) = p_tenant_id
+        and c.deleted_at is null
+        and coalesce(c.is_deleted, false) = false
+        and public.web_normalize_company_name(c.name) = public.web_normalize_company_name(old_company.name)
+      order by c.updated_at desc, c.created_at desc, c.id
+      limit 1
+    ) canonical on true
+    where r.deleted_at is null
+      and coalesce(r.is_deleted, false) = false
+      and (r.company_id is distinct from canonical.id or r.tenant_id is distinct from canonical.tenant_id)
+  )
+  update public.representatives r
+  set company_id = rep_map.new_company_id,
+      tenant_id = rep_map.new_tenant_id,
+      updated_at = v_now,
+      sync_status = 'SYNCED'
+  from rep_map
+  where r.id = rep_map.rep_id;
+
   with keep(id) as (
     select value::uuid from jsonb_array_elements_text(p_company_ids)
   )

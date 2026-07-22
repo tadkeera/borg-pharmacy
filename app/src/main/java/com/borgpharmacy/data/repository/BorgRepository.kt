@@ -596,20 +596,24 @@ class OfflineFirstBorgRepository(
             Log.w("BorgSync", "User push failed", throwable)
         }
 
+        // إصلاح مهم: عند استبدال كتالوج الشركات يجب أولاً نقل المندوبين من company_id القديم
+        // إلى company_id الجديد المطابق بالاسم، ثم بعد ذلك فقط نحذف الشركات القديمة.
+        runCatching {
+            syncService.repairRepresentativeCompanyLinks(activeTenantId)
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Representative company link repair failed", throwable)
+        }
+
         if (replacePending) {
             val activeCompanyIds = db.companyDao().activeIdsForTenant(activeTenantId)
             runCatching {
                 syncService.pruneTenantToActiveCompanies(activeTenantId, activeCompanyIds)
                 setCatalogReplacePending(false)
+                // بعد الـ prune نعيد الإصلاح مرة ثانية احتياطياً إذا تغيرت حالة الشركات في السحابة.
+                syncService.repairRepresentativeCompanyLinks(activeTenantId)
             }.onFailure { throwable ->
                 Log.w("BorgSync", "Remote catalog prune failed; replacement flag kept for next sync", throwable)
             }
-        }
-
-        runCatching {
-            syncService.repairRepresentativeCompanyLinks(activeTenantId)
-        }.onFailure { throwable ->
-            Log.w("BorgSync", "Representative company link repair failed", throwable)
         }
 
         val remote = runCatching { syncService.pullAll(activeTenantId) }
