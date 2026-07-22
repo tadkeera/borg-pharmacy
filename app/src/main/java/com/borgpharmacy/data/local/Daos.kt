@@ -16,6 +16,9 @@ interface CompanyDao {
     suspend fun listActiveForTenant(tenantId: String): List<CompanyEntity>
     suspend fun listActive(): List<CompanyEntity> = listActiveForTenant(DEFAULT_TENANT_ID)
 
+    @Query("SELECT * FROM companies WHERE tenantId = :tenantId ORDER BY updatedAt DESC")
+    suspend fun listAllIncludingDeletedForTenant(tenantId: String): List<CompanyEntity>
+
     @Query("SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL")
     suspend fun activeIdsForTenant(tenantId: String): List<String>
 

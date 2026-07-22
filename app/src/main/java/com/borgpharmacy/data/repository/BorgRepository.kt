@@ -330,33 +330,69 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun importCompaniesCsv(csv: String): Int {
-        val rows = csv.lineSequence()
+        val tenantId = getActiveTenantId()
+        val now = System.currentTimeMillis()
+        val importedNames = csv.lineSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .dropWhile { it.lowercase().contains("company") || it.lowercase().contains("name") }
-            .map { line -> line.split(',', ';', '\t').firstOrNull()?.trim().orEmpty() }
+            .map { line -> line.split(',', ';', '	').firstOrNull()?.trim().orEmpty().cleanCompanyNameForMatchDisplay() }
             .filter { it.isNotBlank() }
-            .distinctBy { it.lowercase() }
-            .map { CompanyEntity(name = it) }
+            .distinctBy { it.normalizedCompanyKey() }
             .toList()
-        if (rows.isNotEmpty()) {
-            db.withTransaction {
-                db.companyDao().upsertAll(rows)
-                val start = cycleStart()
-                var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
-                val allUpserts = mutableListOf<Visit>()
-                rows.forEach { row ->
-                    val plan = scheduleGenerator.reconcileSingleCompany(start, row.toDomain(), workingVisits)
-                    applySchedulePlan(plan)
-                    persistBaseSlotsFromVisits(plan.visitsToUpsert)
-                    workingVisits = workingVisits + plan.visitsToUpsert
-                    allUpserts += plan.visitsToUpsert
+
+        if (importedNames.isEmpty()) return 0
+
+        val rows = db.withTransaction {
+            // إصلاح جذري: بعد حذف الكتالوج ثم استيراده، نعيد استخدام نفس company.id حسب الاسم المطبّع.
+            // بهذه الطريقة لا تنكسر علاقة المندوبين المضافين من صفحة الويب مع شركاتهم.
+            val existingByName = db.companyDao()
+                .listAllIncludingDeletedForTenant(tenantId)
+                .groupBy { it.name.normalizedCompanyKey() }
+                .mapValues { (_, matches) -> matches.maxByOrNull { it.updatedAt } }
+
+            val restoredRows = importedNames.map { companyName ->
+                val old = existingByName[companyName.normalizedCompanyKey()]
+                if (old != null) {
+                    old.copy(
+                        name = companyName,
+                        deletedAt = null,
+                        isDeleted = false,
+                        dirty = true,
+                        syncStatus = com.borgpharmacy.data.local.SyncStatus.PENDING.name,
+                        updatedAt = now,
+                    )
+                } else {
+                    CompanyEntity(
+                        tenantId = tenantId,
+                        name = companyName,
+                        createdAt = now,
+                        updatedAt = now,
+                        dirty = true,
+                        syncStatus = com.borgpharmacy.data.local.SyncStatus.PENDING.name,
+                        isDeleted = false,
+                    )
                 }
-                persistBaseSlotsFromVisits(allUpserts)
-                repairCurrentCycleLocked(start)
             }
-            afterMutation("csv_import")
+
+            db.companyDao().upsertAll(restoredRows)
+            val start = cycleStart()
+            var workingVisits = db.visitDao().listCycleForTenant(tenantId, start.toEpochDay()).map { it.toDomain() }
+            val allUpserts = mutableListOf<Visit>()
+            restoredRows.forEach { row ->
+                val plan = scheduleGenerator.reconcileSingleCompany(start, row.toDomain(), workingVisits)
+                applySchedulePlan(plan)
+                persistBaseSlotsFromVisits(plan.visitsToUpsert)
+                val deleteIds = plan.visitsToSoftDelete.map { it.id }.toSet()
+                workingVisits = workingVisits.filterNot { it.id in deleteIds } + plan.visitsToUpsert
+                allUpserts += plan.visitsToUpsert
+            }
+            persistBaseSlotsFromVisits(allUpserts)
+            repairCurrentCycleLocked(start)
+            restoredRows
         }
+
+        afterMutation("csv_import")
         return rows.size
     }
 
@@ -769,6 +805,25 @@ class OfflineFirstBorgRepository(
         username.equals("admin", ignoreCase = true) &&
             mustChangePasscode &&
             passcodeHash == SecurityHasher.hashPasscode("admin2026")
+
+    private fun String.cleanCompanyNameForMatchDisplay(): String = trim()
+        .trim('"', '\'', '“', '”')
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    private fun String.normalizedCompanyKey(): String = cleanCompanyNameForMatchDisplay()
+        .lowercase()
+        .replace('أ', 'ا')
+        .replace('إ', 'ا')
+        .replace('آ', 'ا')
+        .replace('ٱ', 'ا')
+        .replace('ى', 'ي')
+        .replace('ئ', 'ي')
+        .replace('ؤ', 'و')
+        .replace('ة', 'ه')
+        .replace(Regex("[\\\"'`´‘’“”\\(\\)\\[\\]\\{\\}،,\\.:;؛!؟?\\-_\\/\\\\|]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
     private fun normalizePhone(input: String): String {
         val trimmed = input.trim().ifBlank { "+967" }
