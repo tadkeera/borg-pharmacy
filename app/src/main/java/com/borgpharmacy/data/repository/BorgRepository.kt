@@ -6,6 +6,7 @@ import com.borgpharmacy.backup.BackupService
 import com.borgpharmacy.data.local.AppSettingEntity
 import com.borgpharmacy.data.local.BorgDatabase
 import com.borgpharmacy.data.local.CompanyEntity
+import com.borgpharmacy.data.local.DEFAULT_TENANT_ID
 import com.borgpharmacy.data.local.PrintLogEntity
 import com.borgpharmacy.data.local.RepresentativeEntity
 import com.borgpharmacy.data.local.TierCountTuple
