@@ -302,4 +302,177 @@ select
   (select count(*) from public.companies where deleted_at is null and coalesce(is_deleted, false) = false) active_companies,
   (select count(*) from public.visits v join public.companies c on c.id = v.company_id where v.deleted_at is null and coalesce(v.is_deleted, false) = false and c.deleted_at is null and coalesce(c.is_deleted, false) = false) active_valid_visits;
 
+-- 4) Fix portal representatives: inherit tenant_id from selected company.
+update public.representatives r
+set tenant_id = c.tenant_id,
+    updated_at = greatest(r.updated_at, (extract(epoch from now()) * 1000)::bigint),
+    sync_status = 'SYNCED'
+from public.companies c
+where r.company_id = c.id
+  and c.tenant_id is not null
+  and (r.tenant_id is null or r.tenant_id is distinct from c.tenant_id);
+
+drop function if exists public.register_representative_portal(text, text, uuid);
+
+create function public.register_representative_portal(
+  p_name text,
+  p_phone text,
+  p_company_id uuid
+)
+returns table (
+  status text,
+  representative_id uuid,
+  rep_name text,
+  phone text,
+  company_id uuid,
+  company_name text,
+  message text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text;
+  v_phone text;
+  v_company_name text;
+  v_company_tenant_id uuid;
+  v_existing record;
+  v_new_id uuid;
+  v_now bigint;
+begin
+  v_name := trim(coalesce(p_name, ''));
+  v_phone := public.web_normalize_phone(p_phone);
+  v_now := (extract(epoch from now()) * 1000)::bigint;
+
+  if length(v_name) < 3 then
+    return query select 'invalid_name'::text, null::uuid, v_name, v_phone, p_company_id, null::text, 'اسم المندوب غير مكتمل'::text;
+    return;
+  end if;
+
+  if length(regexp_replace(v_phone, '\D', '', 'g')) < 10 then
+    return query select 'invalid_phone'::text, null::uuid, v_name, v_phone, p_company_id, null::text, 'رقم الجوال غير صحيح'::text;
+    return;
+  end if;
+
+  select c.name, coalesce(c.tenant_id, '00000000-0000-0000-0000-000000000001'::uuid)
+  into v_company_name, v_company_tenant_id
+  from public.companies c
+  where c.id = p_company_id
+    and c.deleted_at is null
+    and coalesce(c.is_deleted, false) = false
+  limit 1;
+
+  if v_company_name is null then
+    return query select 'company_not_found'::text, null::uuid, v_name, v_phone, p_company_id, null::text, 'الشركة غير موجودة أو محذوفة'::text;
+    return;
+  end if;
+
+  select r.id, r.name, r.phone, c.id as c_id, c.name as c_name
+  into v_existing
+  from public.representatives r
+  join public.companies c on c.id = r.company_id
+  where r.deleted_at is null
+    and c.deleted_at is null
+    and coalesce(r.is_deleted, false) = false
+    and coalesce(c.is_deleted, false) = false
+    and public.web_normalize_phone(r.phone) = v_phone
+  order by r.updated_at desc
+  limit 1;
+
+  if found then
+    update public.representatives
+    set tenant_id = v_company_tenant_id,
+        sync_status = 'SYNCED'
+    where id = v_existing.id and (tenant_id is null or tenant_id is distinct from v_company_tenant_id);
+    return query select 'phone_exists'::text, v_existing.id, v_existing.name, public.web_normalize_phone(v_existing.phone), v_existing.c_id, v_existing.c_name, 'رقم الجوال مسجل مسبقاً'::text;
+    return;
+  end if;
+
+  select r.id, r.name, r.phone, c.id as c_id, c.name as c_name
+  into v_existing
+  from public.representatives r
+  join public.companies c on c.id = r.company_id
+  where r.deleted_at is null
+    and c.deleted_at is null
+    and coalesce(r.is_deleted, false) = false
+    and coalesce(c.is_deleted, false) = false
+    and public.web_normalize_representative_name(r.name) = public.web_normalize_representative_name(v_name)
+  order by r.updated_at desc
+  limit 1;
+
+  if found then
+    update public.representatives
+    set tenant_id = v_company_tenant_id,
+        sync_status = 'SYNCED'
+    where id = v_existing.id and (tenant_id is null or tenant_id is distinct from v_company_tenant_id);
+    return query select 'name_exists'::text, v_existing.id, v_existing.name, public.web_normalize_phone(v_existing.phone), v_existing.c_id, v_existing.c_name, 'اسم المندوب مسجل مسبقاً'::text;
+    return;
+  end if;
+
+  v_new_id := gen_random_uuid();
+
+  insert into public.representatives (
+    id, tenant_id, company_id, name, phone, created_at, updated_at, deleted_at, sync_status, is_deleted
+  ) values (
+    v_new_id, v_company_tenant_id, p_company_id, v_name, v_phone, v_now, v_now, null, 'SYNCED', false
+  );
+
+  return query select 'created'::text, v_new_id, v_name, v_phone, p_company_id, v_company_name, 'تم حفظ بيانات المندوب بنجاح'::text;
+end;
+$$;
+
+grant execute on function public.register_representative_portal(text, text, uuid) to anon;
+
+-- 5) Tenant-aware user pull; keeps backward compatibility with older app calls.
+drop function if exists public.borg_pull_users(text);
+drop function if exists public.borg_pull_users(text, uuid);
+
+create function public.borg_pull_users(p_token text, p_tenant_id uuid default null)
+returns table (
+  id uuid,
+  tenant_id uuid,
+  username text,
+  display_name text,
+  role text,
+  passcode_hash text,
+  must_change_passcode boolean,
+  active boolean,
+  created_at bigint,
+  updated_at bigint,
+  sync_status text,
+  is_deleted boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_tenant uuid := coalesce(p_tenant_id, '00000000-0000-0000-0000-000000000001'::uuid);
+begin
+  if not public.borg_sync_token_valid(p_token) then
+    raise exception 'unauthorized borg sync token' using errcode = '28000';
+  end if;
+
+  return query
+  select u.id,
+         coalesce(u.tenant_id, v_tenant) as tenant_id,
+         u.username,
+         u.display_name,
+         u.role,
+         u.passcode_hash,
+         u.must_change_passcode,
+         u.active,
+         u.created_at,
+         u.updated_at,
+         coalesce(u.sync_status, 'SYNCED') as sync_status,
+         coalesce(u.is_deleted, not u.active) as is_deleted
+  from public.users u
+  where coalesce(u.tenant_id, v_tenant) = v_tenant
+  order by u.username;
+end;
+$$;
+
+grant execute on function public.borg_pull_users(text, uuid) to anon;
+
 commit;

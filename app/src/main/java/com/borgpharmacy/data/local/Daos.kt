@@ -110,6 +110,9 @@ interface RepresentativeDao {
 
     @Query("DELETE FROM representatives WHERE tenantId = :tenantId AND dirty = 0 AND (isDeleted = 1 OR deletedAt IS NOT NULL OR companyId NOT IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL))")
     suspend fun purgeDeletedAndOrphansForTenant(tenantId: String)
+
+    @Query("UPDATE representatives SET tenantId = :tenantId WHERE isDeleted = 0 AND deletedAt IS NULL AND companyId IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL) AND tenantId != :tenantId")
+    suspend fun normalizeTenantForActiveCompanyRepresentatives(tenantId: String)
 }
 
 @Dao

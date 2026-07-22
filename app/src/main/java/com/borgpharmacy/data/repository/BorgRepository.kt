@@ -591,6 +591,7 @@ class OfflineFirstBorgRepository(
                 if (mergedCompanies.isNotEmpty()) db.companyDao().upsertAll(mergedCompanies)
             }
             if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
+            db.representativeDao().normalizeTenantForActiveCompanyRepresentatives(activeTenantId)
             if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
             if (remote.users.isNotEmpty()) db.userDao().upsertAll(remote.users)
 
@@ -622,6 +623,7 @@ class OfflineFirstBorgRepository(
     }
 
     private suspend fun purgeInvalidLocalRows(tenantId: String) {
+        db.representativeDao().normalizeTenantForActiveCompanyRepresentatives(tenantId)
         db.visitDao().purgeDeletedAndOrphansForTenant(tenantId)
         db.representativeDao().purgeDeletedAndOrphansForTenant(tenantId)
         db.companyDao().purgeDeletedForTenant(tenantId)

@@ -111,9 +111,18 @@ class SupabaseSyncService {
         val companies = json.decodeFromString<List<CompanyRemoteDto>>(
             getRest("companies?select=*&$activeFilter&order=updated_at.asc")
         ).map { it.toEntity() }
-        val reps = json.decodeFromString<List<RepresentativeRemoteDto>>(
-            getRest("representatives?select=*&$activeFilter&order=updated_at.asc")
-        ).map { it.toEntity() }
+        val activeCompanyIds = companies.map { it.id }.toSet()
+        val reps = if (activeCompanyIds.isEmpty()) {
+            emptyList()
+        } else {
+            // مهم: صفحة الويب القديمة ربما سجلت المندوب tenant_id فارغ/قديم.
+            // نسحب المندوبين النشطين ثم نقبل فقط من company_id تابع لشركات هذا الـ tenant ونطبع tenantId محلياً.
+            json.decodeFromString<List<RepresentativeRemoteDto>>(
+                getRest("representatives?select=*&is_deleted=eq.false&deleted_at=is.null&order=updated_at.asc")
+            ).map { it.toEntity() }
+                .filter { it.companyId in activeCompanyIds }
+                .map { if (it.tenantId == tenantId) it else it.copy(tenantId = tenantId) }
+        }
         val visits = json.decodeFromString<List<VisitRemoteDto>>(
             getRest("visits?select=*&$activeFilter&order=updated_at.asc")
         ).map { it.toEntity() }
