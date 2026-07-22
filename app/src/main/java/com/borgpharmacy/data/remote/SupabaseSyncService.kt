@@ -121,22 +121,58 @@ class SupabaseSyncService(
         json.decodeFromString<CreatedAuthUserDto>(response)
     }
 
-    suspend fun pullAll(): RemoteSnapshot {
-        val companies = client.from("companies").select().decodeList<CompanyRemoteDto>().map { it.toEntity() }
-        val reps = client.from("representatives").select().decodeList<RepresentativeRemoteDto>().map { it.toEntity() }
-        val visits = client.from("visits").select().decodeList<VisitRemoteDto>().map { it.toEntity() }
-        val users = runCatching { pullUsers() }.getOrDefault(emptyList())
-        return RemoteSnapshot(companies, reps, visits, users)
-    }
+    suspend fun pullAll(tenantId: String): RemoteSnapshot = withContext(Dispatchers.IO) {
+    // 1. سحب الشركات الفعالة فقط والخاصة بالـ tenant الحالي
+    val companies = client.from("companies")
+        .select {
+            filter {
+                eq("tenant_id", tenantId)
+                eq("is_deleted", false)
+                exact("deleted_at", null)
+            }
+        }
+        .decodeList<CompanyRemoteDto>()
+        .map { it.toEntity() }
 
-    private suspend fun pullUsers(): List<UserEntity> {
-        val response = postRpc(
-            functionName = "borg_pull_users",
-            body = buildJsonObject { put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN) },
-            preferReturnMinimal = false,
-        )
-        return json.decodeFromString<List<UserRemoteDto>>(response).map { it.toEntity() }
-    }
+    // 2. سحب المندوبين الفعالين فقط
+    val reps = client.from("representatives")
+        .select {
+            filter {
+                eq("tenant_id", tenantId)
+                eq("is_deleted", false)
+                exact("deleted_at", null)
+            }
+        }
+        .decodeList<RepresentativeRemoteDto>()
+        .map { it.toEntity() }
+
+    // 3. سحب الزيارات الفعالة فقط
+    val visits = client.from("visits")
+        .select {
+            filter {
+                eq("tenant_id", tenantId)
+                eq("is_deleted", false)
+                exact("deleted_at", null)
+            }
+        }
+        .decodeList<VisitRemoteDto>()
+        .map { it.toEntity() }
+
+    val users = runCatching { pullUsers(tenantId) }.getOrDefault(emptyList())
+    RemoteSnapshot(companies, reps, visits, users)
+}
+
+private suspend fun pullUsers(tenantId: String): List<UserEntity> {
+    val response = postRpc(
+        functionName = "borg_pull_users",
+        body = buildJsonObject { 
+            put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+            put("p_tenant_id", tenantId)
+        },
+        preferReturnMinimal = false,
+    )
+    return json.decodeFromString<List<UserRemoteDto>>(response).map { it.toEntity() }
+}
 
     private suspend fun postSyncRpc(functionName: String, rows: JsonElement) {
         postRpc(
