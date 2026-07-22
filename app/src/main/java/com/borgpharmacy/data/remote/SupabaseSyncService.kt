@@ -2,11 +2,10 @@ package com.borgpharmacy.data.remote
 
 import com.borgpharmacy.BuildConfig
 import com.borgpharmacy.data.local.CompanyEntity
+import com.borgpharmacy.data.local.DEFAULT_TENANT_ID
 import com.borgpharmacy.data.local.RepresentativeEntity
 import com.borgpharmacy.data.local.UserEntity
 import com.borgpharmacy.data.local.VisitEntity
-import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -21,17 +20,16 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /**
- * Thin cloud sync adapter. Room remains the source of truth.
+ * Offline-first sync adapter.
  *
- * مهم أمنيًا: عمليات الكتابة لا تتم مباشرة على الجداول بمفتاح anon.
- * الكتابة تمر عبر RPC محددة ومحمية بتوكن مزامنة خاص بالتطبيق، بينما تبقى القراءة العامة للجداول غير الحساسة فقط.
- * جدول المستخدمين لا يُقرأ مباشرة بمفتاح anon، بل يُسحب عبر RPC محمية بنفس توكن المزامنة.
+ * Writes are RPC protected by SUPABASE_SYNC_TOKEN.
+ * Pulls are explicitly filtered by tenant_id + active flags to prevent stale/deleted cloud rows
+ * from corrupting the local Room database after a catalog replacement.
  */
-class SupabaseSyncService(
-    private val client: SupabaseClient = SupabaseClientProvider.client,
-) {
+class SupabaseSyncService {
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
     suspend fun signInWithPassword(email: String, password: String): SupabaseAuthSession = withContext(Dispatchers.IO) {
@@ -46,26 +44,12 @@ class SupabaseSyncService(
     }
 
     suspend fun fetchProfile(accessToken: String, userId: String): UserProfileRemoteDto? = withContext(Dispatchers.IO) {
-        val encodedUserId = java.net.URLEncoder.encode(userId, "UTF-8")
-        val connection = (URL("${BuildConfig.SUPABASE_URL}/rest/v1/user_profiles?select=*&user_id=eq.$encodedUserId&limit=1").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 30_000
-            readTimeout = 30_000
-            setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-            setRequestProperty("Authorization", "Bearer $accessToken")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        }
-        try {
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) {
-                throw IllegalStateException("Supabase profile fetch failed with HTTP $code: $response")
-            }
-            json.decodeFromString<List<UserProfileRemoteDto>>(response).firstOrNull()
-        } finally {
-            connection.disconnect()
-        }
+        val encodedUserId = enc(userId)
+        val response = getRest(
+            path = "user_profiles?select=*&user_id=eq.$encodedUserId&limit=1",
+            bearer = accessToken,
+        )
+        json.decodeFromString<List<UserProfileRemoteDto>>(response).firstOrNull()
     }
 
     suspend fun pushCompanies(companies: List<CompanyEntity>) {
@@ -121,58 +105,45 @@ class SupabaseSyncService(
         json.decodeFromString<CreatedAuthUserDto>(response)
     }
 
-    suspend fun pullAll(tenantId: String): RemoteSnapshot = withContext(Dispatchers.IO) {
-    // 1. سحب الشركات الفعالة فقط والخاصة بالـ tenant الحالي
-    val companies = client.from("companies")
-        .select {
-            filter {
-                eq("tenant_id", tenantId)
-                eq("is_deleted", false)
-                exact("deleted_at", null)
-            }
-        }
-        .decodeList<CompanyRemoteDto>()
-        .map { it.toEntity() }
+    suspend fun pullAll(tenantId: String = DEFAULT_TENANT_ID): RemoteSnapshot = withContext(Dispatchers.IO) {
+        val tenant = enc(tenantId)
+        val activeFilter = "tenant_id=eq.$tenant&is_deleted=eq.false&deleted_at=is.null"
+        val companies = json.decodeFromString<List<CompanyRemoteDto>>(
+            getRest("companies?select=*&$activeFilter&order=updated_at.asc")
+        ).map { it.toEntity() }
+        val reps = json.decodeFromString<List<RepresentativeRemoteDto>>(
+            getRest("representatives?select=*&$activeFilter&order=updated_at.asc")
+        ).map { it.toEntity() }
+        val visits = json.decodeFromString<List<VisitRemoteDto>>(
+            getRest("visits?select=*&$activeFilter&order=updated_at.asc")
+        ).map { it.toEntity() }
+        val users = runCatching { pullUsers(tenantId) }.getOrDefault(emptyList())
+        RemoteSnapshot(companies, reps, visits, users)
+    }
 
-    // 2. سحب المندوبين الفعالين فقط
-    val reps = client.from("representatives")
-        .select {
-            filter {
-                eq("tenant_id", tenantId)
-                eq("is_deleted", false)
-                exact("deleted_at", null)
-            }
-        }
-        .decodeList<RepresentativeRemoteDto>()
-        .map { it.toEntity() }
+    suspend fun pruneTenantToActiveCompanies(tenantId: String, activeCompanyIds: List<String>) {
+        postRpc(
+            functionName = "borg_prune_tenant_to_companies",
+            body = buildJsonObject {
+                put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+                put("p_tenant_id", tenantId)
+                put("p_company_ids", json.encodeToJsonElement(activeCompanyIds))
+            },
+            preferReturnMinimal = true,
+        )
+    }
 
-    // 3. سحب الزيارات الفعالة فقط
-    val visits = client.from("visits")
-        .select {
-            filter {
-                eq("tenant_id", tenantId)
-                eq("is_deleted", false)
-                exact("deleted_at", null)
-            }
-        }
-        .decodeList<VisitRemoteDto>()
-        .map { it.toEntity() }
-
-    val users = runCatching { pullUsers(tenantId) }.getOrDefault(emptyList())
-    RemoteSnapshot(companies, reps, visits, users)
-}
-
-private suspend fun pullUsers(tenantId: String): List<UserEntity> {
-    val response = postRpc(
-        functionName = "borg_pull_users",
-        body = buildJsonObject { 
-            put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
-            put("p_tenant_id", tenantId)
-        },
-        preferReturnMinimal = false,
-    )
-    return json.decodeFromString<List<UserRemoteDto>>(response).map { it.toEntity() }
-}
+    private suspend fun pullUsers(tenantId: String): List<UserEntity> {
+        val response = postRpc(
+            functionName = "borg_pull_users",
+            body = buildJsonObject {
+                put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+                put("p_tenant_id", tenantId)
+            },
+            preferReturnMinimal = false,
+        )
+        return json.decodeFromString<List<UserRemoteDto>>(response).map { it.toEntity() }
+    }
 
     private suspend fun postSyncRpc(functionName: String, rows: JsonElement) {
         postRpc(
@@ -185,6 +156,18 @@ private suspend fun pullUsers(tenantId: String): List<UserEntity> {
         )
     }
 
+    private suspend fun getRest(path: String, bearer: String = BuildConfig.SUPABASE_ANON_KEY): String = withContext(Dispatchers.IO) {
+        val connection = (URL("${BuildConfig.SUPABASE_URL}/rest/v1/$path").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30_000
+            readTimeout = 30_000
+            setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            setRequestProperty("Authorization", "Bearer $bearer")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        readResponse(connection, "REST $path")
+    }
+
     private suspend fun postAuth(path: String, body: JsonObject): String = withContext(Dispatchers.IO) {
         val connection = (URL("${BuildConfig.SUPABASE_URL}/auth/v1/$path").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -194,20 +177,8 @@ private suspend fun pullUsers(tenantId: String): List<UserEntity> {
             setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
         }
-
-        try {
-            val bytes = json.encodeToString(JsonObject.serializer(), body).toByteArray(Charsets.UTF_8)
-            connection.outputStream.use { it.write(bytes) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) {
-                throw IllegalStateException("Supabase Auth request failed with HTTP $code: $response")
-            }
-            response
-        } finally {
-            connection.disconnect()
-        }
+        writeJson(connection, body)
+        readResponse(connection, "Auth $path")
     }
 
     private suspend fun postFunction(functionName: String, accessToken: String, body: JsonObject): String = withContext(Dispatchers.IO) {
@@ -220,20 +191,8 @@ private suspend fun pullUsers(tenantId: String): List<UserEntity> {
             setRequestProperty("Authorization", "Bearer $accessToken")
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
         }
-
-        try {
-            val bytes = json.encodeToString(JsonObject.serializer(), body).toByteArray(Charsets.UTF_8)
-            connection.outputStream.use { it.write(bytes) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) {
-                throw IllegalStateException("Supabase Function $functionName failed with HTTP $code: $response")
-            }
-            response
-        } finally {
-            connection.disconnect()
-        }
+        writeJson(connection, body)
+        readResponse(connection, "Function $functionName")
     }
 
     private suspend fun postRpc(functionName: String, body: JsonObject, preferReturnMinimal: Boolean): String = withContext(Dispatchers.IO) {
@@ -247,21 +206,28 @@ private suspend fun pullUsers(tenantId: String): List<UserEntity> {
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             if (preferReturnMinimal) setRequestProperty("Prefer", "return=minimal")
         }
+        writeJson(connection, body)
+        readResponse(connection, "RPC $functionName")
+    }
 
+    private fun writeJson(connection: HttpURLConnection, body: JsonObject) {
+        val bytes = json.encodeToString(JsonObject.serializer(), body).toByteArray(Charsets.UTF_8)
+        connection.outputStream.use { it.write(bytes) }
+    }
+
+    private fun readResponse(connection: HttpURLConnection, label: String): String {
         try {
-            val bytes = json.encodeToString(JsonObject.serializer(), body).toByteArray(Charsets.UTF_8)
-            connection.outputStream.use { it.write(bytes) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) {
-                throw IllegalStateException("Supabase RPC $functionName failed with HTTP $code: $response")
-            }
-            response
+            if (code !in 200..299) throw IllegalStateException("Supabase $label failed with HTTP $code: $response")
+            return response
         } finally {
             connection.disconnect()
         }
     }
+
+    private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 
 data class SupabaseAuthSession(
@@ -279,20 +245,11 @@ data class AuthTokenResponseDto(
     @SerialName("expires_in") val expiresIn: Long = 0,
     val user: AuthUserDto,
 ) {
-    fun toDomain(): SupabaseAuthSession = SupabaseAuthSession(
-        accessToken = accessToken,
-        refreshToken = refreshToken,
-        expiresIn = expiresIn,
-        userId = user.id,
-        email = user.email.orEmpty(),
-    )
+    fun toDomain(): SupabaseAuthSession = SupabaseAuthSession(accessToken, refreshToken, expiresIn, user.id, user.email.orEmpty())
 }
 
 @Serializable
-data class AuthUserDto(
-    val id: String,
-    val email: String? = null,
-)
+data class AuthUserDto(val id: String, val email: String? = null)
 
 @Serializable
 data class UserProfileRemoteDto(
@@ -305,13 +262,7 @@ data class UserProfileRemoteDto(
 )
 
 @Serializable
-data class CreatedAuthUserDto(
-    val id: String,
-    val email: String,
-    val displayName: String,
-    val role: String,
-    val tenantId: String,
-)
+data class CreatedAuthUserDto(val id: String, val email: String, val displayName: String, val role: String, val tenantId: String)
 
 data class RemoteSnapshot(
     val companies: List<CompanyEntity>,
@@ -323,7 +274,7 @@ data class RemoteSnapshot(
 @Serializable
 data class CompanyRemoteDto(
     val id: String,
-    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
+    @SerialName("tenant_id") val tenantId: String = DEFAULT_TENANT_ID,
     val name: String,
     val tier: String,
     @SerialName("base_day_index") val baseDayIndex: Int? = null,
@@ -338,7 +289,7 @@ data class CompanyRemoteDto(
 @Serializable
 data class RepresentativeRemoteDto(
     val id: String,
-    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
+    @SerialName("tenant_id") val tenantId: String = DEFAULT_TENANT_ID,
     @SerialName("company_id") val companyId: String,
     val name: String,
     val phone: String,
@@ -352,7 +303,7 @@ data class RepresentativeRemoteDto(
 @Serializable
 data class VisitRemoteDto(
     val id: String,
-    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
+    @SerialName("tenant_id") val tenantId: String = DEFAULT_TENANT_ID,
     @SerialName("company_id") val companyId: String,
     @SerialName("cycle_start_epoch_day") val cycleStartEpochDay: Long,
     @SerialName("day_of_cycle") val dayOfCycle: Int,
@@ -371,7 +322,7 @@ data class VisitRemoteDto(
 @Serializable
 data class UserRemoteDto(
     val id: String,
-    @SerialName("tenant_id") val tenantId: String = com.borgpharmacy.data.local.DEFAULT_TENANT_ID,
+    @SerialName("tenant_id") val tenantId: String = DEFAULT_TENANT_ID,
     val username: String,
     @SerialName("display_name") val displayName: String,
     val role: String,
@@ -384,19 +335,7 @@ data class UserRemoteDto(
     @SerialName("is_deleted") val isDeleted: Boolean = !active,
 )
 
-private fun CompanyEntity.toRemote() = CompanyRemoteDto(
-    id = id,
-    tenantId = tenantId,
-    name = name,
-    tier = tier,
-    baseDayIndex = baseDayIndex,
-    baseShift = baseShift,
-    createdAt = createdAt,
-    updatedAt = updatedAt,
-    deletedAt = deletedAt,
-    syncStatus = syncStatus,
-    isDeleted = isDeleted,
-)
+private fun CompanyEntity.toRemote() = CompanyRemoteDto(id, tenantId, name, tier, baseDayIndex, baseShift, createdAt, updatedAt, deletedAt, syncStatus, isDeleted)
 private fun RepresentativeEntity.toRemote() = RepresentativeRemoteDto(id, tenantId, companyId, name, phone, createdAt, updatedAt, deletedAt, syncStatus, isDeleted)
 private fun VisitEntity.toRemote() = VisitRemoteDto(id, tenantId, companyId, cycleStartEpochDay, dayOfCycle, weekOfCycle, dateEpochDay, shift, slotIndex, status, createdAt, updatedAt, deletedAt, syncStatus, isDeleted)
 private fun UserEntity.toRemote() = UserRemoteDto(id, tenantId, username, displayName, role, passcodeHash, mustChangePasscode, active, createdAt, updatedAt, syncStatus, isDeleted)

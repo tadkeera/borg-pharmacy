@@ -16,6 +16,9 @@ interface CompanyDao {
     suspend fun listActiveForTenant(tenantId: String): List<CompanyEntity>
     suspend fun listActive(): List<CompanyEntity> = listActiveForTenant(DEFAULT_TENANT_ID)
 
+    @Query("SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL")
+    suspend fun activeIdsForTenant(tenantId: String): List<String>
+
     @Query("SELECT * FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL AND name LIKE '%' || :query || '%' ORDER BY name COLLATE NOCASE LIMIT 50")
     suspend fun searchForTenant(tenantId: String, query: String): List<CompanyEntity>
     suspend fun search(query: String): List<CompanyEntity> = searchForTenant(DEFAULT_TENANT_ID, query)
@@ -58,6 +61,12 @@ interface CompanyDao {
     @Query("UPDATE companies SET syncStatus = 'FAILED' WHERE id IN (:ids)")
     suspend fun markFailed(ids: List<String>)
 
+    @Query("DELETE FROM companies WHERE tenantId = :tenantId AND dirty = 0 AND (isDeleted = 1 OR deletedAt IS NOT NULL)")
+    suspend fun purgeDeletedForTenant(tenantId: String)
+
+    @Query("DELETE FROM companies WHERE tenantId = :tenantId AND dirty = 0 AND isDeleted = 0 AND deletedAt IS NULL AND id NOT IN (:keepIds)")
+    suspend fun purgeSyncedActiveNotInForTenant(tenantId: String, keepIds: List<String>)
+
     @Query("SELECT tier, COUNT(*) AS count FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL GROUP BY tier")
     fun observeTierCountsForTenant(tenantId: String): Flow<List<TierCountTuple>>
     fun observeTierCounts(): Flow<List<TierCountTuple>> = observeTierCountsForTenant(DEFAULT_TENANT_ID)
@@ -98,6 +107,9 @@ interface RepresentativeDao {
 
     @Query("UPDATE representatives SET syncStatus = 'FAILED' WHERE id IN (:ids)")
     suspend fun markFailed(ids: List<String>)
+
+    @Query("DELETE FROM representatives WHERE tenantId = :tenantId AND dirty = 0 AND (isDeleted = 1 OR deletedAt IS NOT NULL OR companyId NOT IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL))")
+    suspend fun purgeDeletedAndOrphansForTenant(tenantId: String)
 }
 
 @Dao
@@ -157,6 +169,9 @@ interface VisitDao {
 
     @Query("UPDATE visits SET syncStatus = 'FAILED' WHERE id IN (:ids)")
     suspend fun markFailed(ids: List<String>)
+
+    @Query("DELETE FROM visits WHERE tenantId = :tenantId AND dirty = 0 AND (isDeleted = 1 OR deletedAt IS NOT NULL OR companyId NOT IN (SELECT id FROM companies WHERE tenantId = :tenantId AND isDeleted = 0 AND deletedAt IS NULL))")
+    suspend fun purgeDeletedAndOrphansForTenant(tenantId: String)
 }
 
 @Dao
