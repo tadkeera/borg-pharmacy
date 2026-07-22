@@ -6,6 +6,7 @@ import com.borgpharmacy.backup.BackupService
 import com.borgpharmacy.data.local.AppSettingEntity
 import com.borgpharmacy.data.local.BorgDatabase
 import com.borgpharmacy.data.local.CompanyEntity
+import com.borgpharmacy.data.local.DEFAULT_TENANT_ID
 import com.borgpharmacy.data.local.PrintLogEntity
 import com.borgpharmacy.data.local.RepresentativeEntity
 import com.borgpharmacy.data.local.TierCountTuple
@@ -23,6 +24,7 @@ import com.borgpharmacy.domain.Representative
 import com.borgpharmacy.domain.RepresentativeInquiryReport
 import com.borgpharmacy.domain.ScheduleGenerator
 import com.borgpharmacy.domain.SchedulePlan
+import com.borgpharmacy.domain.Shift
 import com.borgpharmacy.domain.Tier
 import com.borgpharmacy.domain.UserAccount
 import com.borgpharmacy.domain.UserRole
@@ -31,15 +33,15 @@ import com.borgpharmacy.domain.VisitStatus
 import com.borgpharmacy.security.SecurityHasher
 import com.borgpharmacy.ui.screens.BotLog
 import io.github.jan.supabase.postgrest.from
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import java.time.LocalDate
 import java.util.UUID
 
@@ -58,7 +60,6 @@ data class BotLogDto(
     @SerialName("matched_company") val matchedCompany: String,
     @SerialName("created_at") val createdAt: String? = null,
 )
-
 
 @Serializable
 data class RepresentativePortalReportDto(
@@ -124,18 +125,55 @@ class OfflineFirstBorgRepository(
 ) : BorgRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    override fun observeCompanies(): Flow<List<Company>> = db.companyDao().observeActive().map { list -> list.map { it.toDomain() } }
-    override fun observeRepresentatives(): Flow<List<Representative>> = db.representativeDao().observeActive().map { list -> list.map { it.toDomain() } }
-    override fun observeVisits(): Flow<List<Visit>> = db.visitDao().observeActive().map { list -> list.map { it.toDomain() } }
-    override fun observePrintCounts(): Flow<List<PrintCount>> = db.printLogDao().observeCounts().map { rows -> rows.map { PrintCount(it.repId, it.visitId, it.count) } }
-    override fun observeUsers(): Flow<List<UserAccount>> = db.userDao().observeActive().map { list -> list.map { it.toDomain() } }
-    override fun observeTierCounts(): Flow<List<TierCountTuple>> = db.companyDao().observeTierCounts()
+    private suspend fun getActiveTenantId(): String {
+        return db.appSettingsDao().getValue(AUTH_TENANT_ID_KEY)
+            ?.takeIf { it.isNotBlank() } ?: DEFAULT_TENANT_ID
+    }
+
+    override fun observeCompanies(): Flow<List<Company>> = flow {
+        val tenantId = getActiveTenantId()
+        db.companyDao().observeActiveForTenant(tenantId).collect { list ->
+            emit(list.map { it.toDomain() })
+        }
+    }
+
+    override fun observeRepresentatives(): Flow<List<Representative>> = flow {
+        val tenantId = getActiveTenantId()
+        db.representativeDao().observeActiveForTenant(tenantId).collect { list ->
+            emit(list.map { it.toDomain() })
+        }
+    }
+
+    override fun observeVisits(): Flow<List<Visit>> = flow {
+        val tenantId = getActiveTenantId()
+        db.visitDao().observeActiveForTenant(tenantId).collect { list ->
+            emit(list.map { it.toDomain() })
+        }
+    }
+
+    override fun observePrintCounts(): Flow<List<PrintCount>> = flow {
+        val tenantId = getActiveTenantId()
+        db.printLogDao().observeCountsForTenant(tenantId).collect { rows ->
+            emit(rows.map { PrintCount(it.repId, it.visitId, it.count) })
+        }
+    }
+
+    override fun observeUsers(): Flow<List<UserAccount>> = flow {
+        val tenantId = getActiveTenantId()
+        db.userDao().observeActiveForTenant(tenantId).collect { list ->
+            emit(list.map { it.toDomain() })
+        }
+    }
+
+    override fun observeTierCounts(): Flow<List<TierCountTuple>> = flow {
+        val tenantId = getActiveTenantId()
+        db.companyDao().observeTierCountsForTenant(tenantId).collect { emit(it) }
+    }
 
     override suspend fun initialize(): LocalDate {
         backupService.ensureDirectories()
         seedDefaultAdmin()
         val start = cycleStart()
-        // إصلاح محلي فوري قبل ظهور الواجهة: يمنع عرض زيارات يتيمة أو مكررة بعد ترقيات المزامنة.
         runCatching { ensureCurrentCycleSchedule() }
             .onFailure { throwable -> Log.w("BorgInit", "Initial local schedule repair failed", throwable) }
         scope.launch { syncNow() }
@@ -159,6 +197,7 @@ class OfflineFirstBorgRepository(
                     role = UserRole.ADMIN.name,
                     passcodeHash = SecurityHasher.hashPasscode("admin2026"),
                     mustChangePasscode = true,
+                    tenantId = DEFAULT_TENANT_ID,
                 )
             )
         }
@@ -170,7 +209,6 @@ class OfflineFirstBorgRepository(
 
         val passcodeHash = SecurityHasher.hashPasscode(passcode)
 
-        // المرحلة الجديدة: تسجيل الدخول عبر Supabase Auth أولاً.
         val authUser = runCatching {
             val session = syncService.signInWithPassword(cleanUsername, passcode)
             val profile = syncService.fetchProfile(session.accessToken, session.userId)
@@ -200,7 +238,6 @@ class OfflineFirstBorgRepository(
 
         if (authUser != null) return authUser.toDomain()
 
-        // احتياطي مؤقت حتى يتم اكتمال نقل كل الأجهزة إلى Supabase Auth.
         var user = db.userDao().findByUsername(cleanUsername)
         if (user == null || !SecurityHasher.verify(passcode, user.passcodeHash)) {
             val remoteUser = runCatching { syncService.loginUser(cleanUsername, passcodeHash) }
@@ -261,8 +298,8 @@ class OfflineFirstBorgRepository(
         val cleanDisplayName = displayName.trim().ifBlank { cleanEmail }
         val passcodeHash = SecurityHasher.hashPasscode(passcode)
         val accessToken = db.appSettingsDao().getValue(AUTH_ACCESS_TOKEN_KEY).orEmpty()
+        val tenantId = getActiveTenantId()
 
-        // المرحلة الجديدة: إنشاء المستخدم في Supabase Auth عبر Edge Function آمنة يستدعيها الأدمن فقط.
         val authCreated = if (accessToken.isNotBlank()) {
             runCatching {
                 syncService.adminCreateAuthUser(
@@ -296,6 +333,7 @@ class OfflineFirstBorgRepository(
             )
         } else {
             UserEntity(
+                tenantId = tenantId,
                 username = cleanEmail,
                 displayName = cleanDisplayName,
                 role = role.name,
@@ -311,13 +349,14 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun addCompany(name: String): Company {
+        val tenantId = getActiveTenantId()
         val company = Company(name = name.trim().ifBlank { "شركة بدون اسم" })
         db.withTransaction {
-            db.companyDao().upsert(company.toEntity())
+            db.companyDao().upsert(company.toEntity(tenantId = tenantId))
             val start = cycleStart()
-            val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+            val visits = db.visitDao().listCycleForTenant(tenantId, start.toEpochDay()).map { it.toDomain() }
             val plan = scheduleGenerator.reconcileSingleCompany(start, company, visits)
-            applySchedulePlan(plan)
+            applySchedulePlan(plan, tenantId)
             persistBaseSlotsFromVisits(plan.visitsToUpsert)
             repairCurrentCycleLocked(start)
         }
@@ -326,6 +365,7 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun importCompaniesCsv(csv: String): Int {
+        val tenantId = getActiveTenantId()
         val rows = csv.lineSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -333,17 +373,17 @@ class OfflineFirstBorgRepository(
             .map { line -> line.split(',', ';', '\t').firstOrNull()?.trim().orEmpty() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase() }
-            .map { CompanyEntity(name = it) }
+            .map { CompanyEntity(tenantId = tenantId, name = it) }
             .toList()
         if (rows.isNotEmpty()) {
             db.withTransaction {
                 db.companyDao().upsertAll(rows)
                 val start = cycleStart()
-                var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+                var workingVisits = db.visitDao().listCycleForTenant(tenantId, start.toEpochDay()).map { it.toDomain() }
                 val allUpserts = mutableListOf<Visit>()
                 rows.forEach { row ->
                     val plan = scheduleGenerator.reconcileSingleCompany(start, row.toDomain(), workingVisits)
-                    applySchedulePlan(plan)
+                    applySchedulePlan(plan, tenantId)
                     persistBaseSlotsFromVisits(plan.visitsToUpsert)
                     workingVisits = workingVisits + plan.visitsToUpsert
                     allUpserts += plan.visitsToUpsert
@@ -364,9 +404,10 @@ class OfflineFirstBorgRepository(
         val normalized = changes.filterKeys { it.isNotBlank() }
         if (normalized.isEmpty()) return
 
+        val tenantId = getActiveTenantId()
         val start = cycleStart()
         db.withTransaction {
-            var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+            var workingVisits = db.visitDao().listCycleForTenant(tenantId, start.toEpochDay()).map { it.toDomain() }
             val accumulatedDeletes = mutableListOf<Visit>()
             val accumulatedUpserts = mutableListOf<Visit>()
 
@@ -389,7 +430,8 @@ class OfflineFirstBorgRepository(
                 SchedulePlan(
                     visitsToUpsert = accumulatedUpserts.distinctBy { it.id },
                     visitsToSoftDelete = accumulatedDeletes.distinctBy { it.id },
-                )
+                ),
+                tenantId
             )
         }
         afterMutation("tier_batch")
@@ -406,10 +448,10 @@ class OfflineFirstBorgRepository(
         afterMutation("company_name")
     }
 
-    private suspend fun applySchedulePlan(plan: SchedulePlan) {
+    private suspend fun applySchedulePlan(plan: SchedulePlan, tenantId: String) {
         val deleteIds = plan.visitsToSoftDelete.map { it.id }
         if (deleteIds.isNotEmpty()) db.visitDao().softDeleteByIds(deleteIds)
-        if (plan.visitsToUpsert.isNotEmpty()) db.visitDao().upsertAll(plan.visitsToUpsert.map { it.toEntity() })
+        if (plan.visitsToUpsert.isNotEmpty()) db.visitDao().upsertAll(plan.visitsToUpsert.map { it.toEntity(tenantId = tenantId) })
     }
 
     private suspend fun persistBaseSlotsFromVisits(visits: List<Visit>) {
@@ -424,9 +466,10 @@ class OfflineFirstBorgRepository(
     }
 
     private suspend fun persistMissingBaseSlots(start: LocalDate) {
-        val companies = db.companyDao().listActive().filter { it.baseDayIndex == null || it.baseShift == null }
+        val tenantId = getActiveTenantId()
+        val companies = db.companyDao().listActiveForTenant(tenantId).filter { it.baseDayIndex == null || it.baseShift == null }
         if (companies.isEmpty()) return
-        val visitsByCompany = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }.groupBy { it.companyId }
+        val visitsByCompany = db.visitDao().listCycleForTenant(tenantId, start.toEpochDay()).map { it.toDomain() }.groupBy { it.companyId }
         companies.forEach { company ->
             val visit = visitsByCompany[company.id]
                 ?.filter { it.weekOfCycle == 1 }
@@ -435,7 +478,7 @@ class OfflineFirstBorgRepository(
                 ?: return@forEach
             val inferredDay = Math.floorMod((((visit.dayOfCycle - 1) % 7).coerceIn(0, 4)) - (visit.weekOfCycle - 1), 5)
             val inferredShift = if (visit.weekOfCycle == 2 || visit.weekOfCycle == 4) {
-                if (visit.shift == com.borgpharmacy.domain.Shift.MORNING) com.borgpharmacy.domain.Shift.EVENING else com.borgpharmacy.domain.Shift.MORNING
+                if (visit.shift == Shift.MORNING) Shift.EVENING else Shift.MORNING
             } else {
                 visit.shift
             }
@@ -444,16 +487,17 @@ class OfflineFirstBorgRepository(
     }
 
     private suspend fun repairCurrentCycleLocked(start: LocalDate): Boolean {
+        val tenantId = getActiveTenantId()
         persistMissingBaseSlots(start)
         var changed = false
-        var workingVisits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
-        val companies = db.companyDao().listActive().map { it.toDomain() }
+        var workingVisits = db.visitDao().listCycleForTenant(tenantId, start.toEpochDay()).map { it.toDomain() }
+        val companies = db.companyDao().listActiveForTenant(tenantId).map { it.toDomain() }
         companies.forEach { company ->
             val activeCount = workingVisits.count { it.companyId == company.id }
             if (activeCount == 4 && company.baseDayIndex != null && company.baseShift != null) return@forEach
             val plan = scheduleGenerator.reconcileSingleCompany(start, company, workingVisits)
             if (plan.visitsToUpsert.isNotEmpty() || plan.visitsToSoftDelete.isNotEmpty()) {
-                applySchedulePlan(plan)
+                applySchedulePlan(plan, tenantId)
                 persistBaseSlotsFromVisits(plan.visitsToUpsert)
                 val deleteIds = plan.visitsToSoftDelete.map { it.id }.toSet()
                 workingVisits = workingVisits.filterNot { it.id in deleteIds } + plan.visitsToUpsert
@@ -474,18 +518,20 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun deleteAllCompanies() {
+        val tenantId = getActiveTenantId()
         db.withTransaction {
             val timestamp = System.currentTimeMillis()
-            db.companyDao().softDeleteAll(timestamp)
-            db.representativeDao().softDeleteAll(timestamp)
-            db.visitDao().softDeleteAll(timestamp)
+            db.companyDao().softDeleteAllForTenant(tenantId, timestamp)
+            db.representativeDao().softDeleteAllForTenant(tenantId, timestamp)
+            db.visitDao().softDeleteAllForTenant(tenantId, timestamp)
         }
         afterMutation("company_delete_all")
     }
 
     override suspend fun addRepresentative(companyId: String, name: String, phone: String): Representative {
+        val tenantId = getActiveTenantId()
         val rep = Representative(companyId = companyId, name = name.trim(), phone = normalizePhone(phone))
-        db.representativeDao().upsert(rep.toEntity())
+        db.representativeDao().upsert(rep.toEntity(tenantId = tenantId))
         afterMutation("representative")
         return rep
     }
@@ -501,17 +547,19 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun recordPrint(repId: String, visitId: String) {
-        db.printLogDao().insert(PrintLogEntity(repId = repId, visitId = visitId))
+        val tenantId = getActiveTenantId()
+        db.printLogDao().insert(PrintLogEntity(tenantId = tenantId, repId = repId, visitId = visitId))
         afterMutation("print")
     }
 
     override suspend fun rescheduleCurrentCycle() {
+        val tenantId = getActiveTenantId()
         val start = cycleStart()
-        val companies = db.companyDao().listActive().map { it.toDomain() }
-        val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
+        val companies = db.companyDao().listActiveForTenant(tenantId).map { it.toDomain() }
+        val visits = db.visitDao().listCycleForTenant(tenantId, start.toEpochDay()).map { it.toDomain() }
         val plan = scheduleGenerator.reconcile(start, companies, visits)
         db.withTransaction {
-            applySchedulePlan(plan)
+            applySchedulePlan(plan, tenantId)
             persistBaseSlotsFromVisits(plan.visitsToUpsert)
             repairCurrentCycleLocked(start)
         }
@@ -519,96 +567,105 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun syncNow() {
-    // جلب tenant_id النشط للمستخدم الحالي
-    val activeTenantId = db.appSettingsDao().getValue(AUTH_TENANT_ID_KEY)
-        ?.takeIf { it.isNotBlank() } ?: DEFAULT_TENANT_ID
+        val activeTenantId = getActiveTenantId()
 
-    val companies = db.companyDao().dirtyForTenant(activeTenantId)
-    val reps = db.representativeDao().dirtyForTenant(activeTenantId)
-    val visits = db.visitDao().dirtyForTenant(activeTenantId)
-    val users = db.userDao().listAllForTenant(activeTenantId)
+        val companies = db.companyDao().dirtyForTenant(activeTenantId)
+        val reps = db.representativeDao().dirtyForTenant(activeTenantId)
+        val visits = db.visitDao().dirtyForTenant(activeTenantId)
+        val users = db.userDao().listAllForTenant(activeTenantId)
 
-    // دفع التعديلات المحلية للسحابة
-    runCatching {
-        syncService.pushCompanies(companies)
-        if (companies.isNotEmpty()) db.companyDao().markClean(companies.map { it.id })
-    }.onFailure { throwable -> Log.w("BorgSync", "Company push failed", throwable) }
-
-    runCatching {
-        syncService.pushRepresentatives(reps)
-        if (reps.isNotEmpty()) db.representativeDao().markClean(reps.map { it.id })
-    }.onFailure { throwable -> Log.w("BorgSync", "Representative push failed", throwable) }
-
-    runCatching {
-        syncService.pushVisits(visits)
-        if (visits.isNotEmpty()) db.visitDao().markClean(visits.map { it.id })
-    }.onFailure { throwable -> Log.w("BorgSync", "Visit push failed", throwable) }
-
-    runCatching { syncService.pushUsers(users) }
-        .onFailure { throwable -> Log.w("BorgSync", "User push failed", throwable) }
-
-    // سحب البيانات من السحابة مع الفلترة بـ tenant_id النشط
-    val remote = runCatching { syncService.pullAll(activeTenantId) }
-        .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed", throwable) }
-        .getOrNull() ?: return
-
-    db.withTransaction {
-        if (remote.companies.isNotEmpty()) {
-            val mergedCompanies = remote.companies.map { remoteCompany ->
-                val local = db.companyDao().getById(remoteCompany.id)
-                remoteCompany.copy(
-                    baseDayIndex = remoteCompany.baseDayIndex ?: local?.baseDayIndex,
-                    baseShift = remoteCompany.baseShift ?: local?.baseShift,
-                )
-            }
-            db.companyDao().upsertAll(mergedCompanies)
-        }
-        if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
-        if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
-        if (remote.users.isNotEmpty()) db.userDao().upsertAll(remote.users)
-
-        // إزالة جراحية محددة لأي زيارات أو مندوبين يتامى أصبحت شركاتهم محذوفة
-        db.compileStatement("""
-            DELETE FROM visits 
-            WHERE isDeleted = 1 
-               OR companyId NOT IN (SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL)
-        """).executeUpdateDelete()
-
-        db.compileStatement("""
-            DELETE FROM representatives 
-            WHERE isDeleted = 1 
-               OR companyId NOT IN (SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL)
-        """).executeUpdateDelete()
-
-        db.compileStatement("""
-            DELETE FROM companies WHERE isDeleted = 1
-        """).executeUpdateDelete()
-    }
-
-    if (ensureCurrentCycleSchedule()) {
-        val generatedVisits = db.visitDao().dirtyForTenant(activeTenantId)
         runCatching {
-            syncService.pushVisits(generatedVisits)
-            if (generatedVisits.isNotEmpty()) db.visitDao().markClean(generatedVisits.map { it.id })
-        }.onFailure { throwable -> Log.w("BorgSync", "Generated visits push failed", throwable) }
-    }
+            syncService.pushCompanies(companies)
+            if (companies.isNotEmpty()) db.companyDao().markClean(companies.map { it.id })
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Company push failed; continuing with pull", throwable)
+        }
+
+        runCatching {
+            syncService.pushRepresentatives(reps)
+            if (reps.isNotEmpty()) db.representativeDao().markClean(reps.map { it.id })
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Representative push failed; continuing with pull", throwable)
+        }
+
+        runCatching {
+            syncService.pushVisits(visits)
+            if (visits.isNotEmpty()) db.visitDao().markClean(visits.map { it.id })
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Visit push failed; continuing with pull", throwable)
+        }
+
+        runCatching {
+            syncService.pushUsers(users)
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "User push failed; continuing with pull", throwable)
+        }
+
+        val remote = runCatching { syncService.pullAll(activeTenantId) }
+            .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed; local cache remains authoritative", throwable) }
+            .getOrNull()
+            ?: return
+
+        db.withTransaction {
+            if (remote.companies.isNotEmpty()) {
+                val mergedCompanies = remote.companies.map { remoteCompany ->
+                    val local = db.companyDao().getById(remoteCompany.id)
+                    remoteCompany.copy(
+                        baseDayIndex = remoteCompany.baseDayIndex ?: local?.baseDayIndex,
+                        baseShift = remoteCompany.baseShift ?: local?.baseShift,
+                    )
+                }
+                db.companyDao().upsertAll(mergedCompanies)
+            }
+            if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
+            if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
+            if (remote.users.isNotEmpty()) db.userDao().upsertAll(remote.users)
+
+            // تنظيف محلي جراحي لمنع تراكم السجلات اليتيمة
+            db.compileStatement("""
+                DELETE FROM visits 
+                WHERE isDeleted = 1 
+                   OR companyId NOT IN (SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL)
+            """).executeUpdateDelete()
+
+            db.compileStatement("""
+                DELETE FROM representatives 
+                WHERE isDeleted = 1 
+                   OR companyId NOT IN (SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL)
+            """).executeUpdateDelete()
+
+            db.compileStatement("""
+                DELETE FROM companies WHERE isDeleted = 1
+            """).executeUpdateDelete()
+        }
+
+        if (ensureCurrentCycleSchedule()) {
+            val generatedVisits = db.visitDao().dirtyForTenant(activeTenantId)
+            runCatching {
+                syncService.pushVisits(generatedVisits)
+                if (generatedVisits.isNotEmpty()) db.visitDao().markClean(generatedVisits.map { it.id })
+            }.onFailure { throwable ->
+                Log.w("BorgSync", "Generated visits push failed", throwable)
+            }
+        }
     }
 
     private suspend fun ensureCurrentCycleSchedule(): Boolean {
+        val tenantId = getActiveTenantId()
         val start = cycleStart()
         val currentEpoch = start.toEpochDay()
-        val companies = db.companyDao().listActive().map { it.toDomain() }
+        val companies = db.companyDao().listActiveForTenant(tenantId).map { it.toDomain() }
         if (companies.isEmpty()) return false
 
-        val currentVisits = db.visitDao().listCycle(currentEpoch).map { it.toDomain() }
+        val currentVisits = db.visitDao().listCycleForTenant(tenantId, currentEpoch).map { it.toDomain() }
         if (currentVisits.isNotEmpty()) {
             return repairCurrentCycleLocked(start)
         }
 
-        val templateEpoch = db.visitDao().latestCycleBefore(currentEpoch)
+        val templateEpoch = db.visitDao().latestCycleBeforeForTenant(tenantId, currentEpoch)
         val candidateVisits = if (templateEpoch != null) {
             val activeCompanyIds = companies.map { it.id }.toSet()
-            db.visitDao().listCycle(templateEpoch)
+            db.visitDao().listCycleForTenant(tenantId, templateEpoch)
                 .map { it.toDomain() }
                 .filter { it.companyId in activeCompanyIds }
                 .map { template ->
@@ -632,7 +689,7 @@ class OfflineFirstBorgRepository(
             persistMissingBaseSlots(start)
             return false
         }
-        applySchedulePlan(plan)
+        applySchedulePlan(plan, tenantId)
         persistBaseSlotsFromVisits(plan.visitsToUpsert)
         persistMissingBaseSlots(start)
         return true
@@ -643,8 +700,9 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun dashboardScores(): List<CompanyReportScore> {
-        val companies = db.companyDao().listActive().map { it.toDomain() }
-        val visits = db.visitDao().listCycle(cycleStart().toEpochDay()).map { it.toDomain() }
+        val tenantId = getActiveTenantId()
+        val companies = db.companyDao().listActiveForTenant(tenantId).map { it.toDomain() }
+        val visits = db.visitDao().listCycleForTenant(tenantId, cycleStart().toEpochDay()).map { it.toDomain() }
         return companies.map { company ->
             val expected = 4
             val completed = visits.count { it.companyId == company.id && it.status == VisitStatus.COMPLETED }
@@ -653,7 +711,6 @@ class OfflineFirstBorgRepository(
         }
     }
 
-    // 🟢 فرض استخدام Dispatchers.IO بشكل صارم لتجنب أي تعليق في الواجهة الرئيسية
     override suspend fun fetchBotConfig(): Pair<String, Boolean> = withContext(Dispatchers.IO) {
         try {
             val configs = SupabaseClientProvider.client
@@ -729,11 +786,6 @@ class OfflineFirstBorgRepository(
             emptyList()
         }
     }
-
-    private fun UserEntity.isUnchangedSeedAdmin(): Boolean =
-        username.equals("admin", ignoreCase = true) &&
-            mustChangePasscode &&
-            passcodeHash == SecurityHasher.hashPasscode("admin2026")
 
     private fun normalizePhone(input: String): String {
         val trimmed = input.trim().ifBlank { "+967" }
