@@ -620,6 +620,9 @@ class OfflineFirstBorgRepository(
             .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed; local cache remains authoritative", throwable) }
             .getOrNull()
             ?: return
+        val portalReports = runCatching { fetchRepresentativeInquiryReports() }
+            .onFailure { throwable -> Log.w("BorgSync", "Portal representative materialization report fetch failed", throwable) }
+            .getOrDefault(emptyList())
 
         db.withTransaction {
             if (remote.companies.isNotEmpty()) {
@@ -638,6 +641,7 @@ class OfflineFirstBorgRepository(
             }
             if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
             db.representativeDao().normalizeTenantForActiveCompanyRepresentatives(activeTenantId)
+            materializePortalRepresentatives(activeTenantId, portalReports)
             if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
             if (remote.users.isNotEmpty()) db.userDao().upsertAll(remote.users)
 
@@ -658,6 +662,45 @@ class OfflineFirstBorgRepository(
             }.onFailure { throwable ->
                 Log.w("BorgSync", "Generated visits push failed", throwable)
             }
+        }
+    }
+
+    private suspend fun materializePortalRepresentatives(
+        tenantId: String,
+        reports: List<RepresentativeInquiryReport>,
+    ) {
+        if (reports.isEmpty()) return
+        val activeCompanies = db.companyDao().listActiveForTenant(tenantId)
+        if (activeCompanies.isEmpty()) return
+
+        val companyById = activeCompanies.associateBy { it.id }
+        val companyByName = activeCompanies
+            .groupBy { it.name.normalizedCompanyKey() }
+            .mapValues { (_, matches) -> matches.maxByOrNull { it.updatedAt } }
+
+        val now = System.currentTimeMillis()
+        val reps = reports.mapNotNull { report ->
+            val targetCompany = companyById[report.companyId]
+                ?: companyByName[report.companyName.normalizedCompanyKey()]
+                ?: return@mapNotNull null
+
+            RepresentativeEntity(
+                id = report.representativeId,
+                tenantId = tenantId,
+                companyId = targetCompany.id,
+                name = report.representativeName.trim(),
+                phone = normalizePhone(report.representativePhone),
+                createdAt = now,
+                updatedAt = now,
+                deletedAt = null,
+                dirty = false,
+                syncStatus = com.borgpharmacy.data.local.SyncStatus.SYNCED.name,
+                isDeleted = false,
+            )
+        }.distinctBy { it.id }
+
+        if (reps.isNotEmpty()) {
+            db.representativeDao().upsertAll(reps)
         }
     }
 
