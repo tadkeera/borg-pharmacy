@@ -19,11 +19,14 @@ import com.borgpharmacy.data.remote.SupabaseSyncService
 import com.borgpharmacy.domain.Company
 import com.borgpharmacy.domain.CompanyReportScore
 import com.borgpharmacy.domain.CycleCalculator
+import com.borgpharmacy.domain.DropOffReport
 import com.borgpharmacy.domain.PrintCount
 import com.borgpharmacy.domain.Representative
 import com.borgpharmacy.domain.RepresentativeInquiryReport
 import com.borgpharmacy.domain.ScheduleGenerator
 import com.borgpharmacy.domain.SchedulePlan
+import com.borgpharmacy.domain.Shift
+import com.borgpharmacy.domain.ShiftHeatmapReport
 import com.borgpharmacy.domain.Tier
 import com.borgpharmacy.domain.UserAccount
 import com.borgpharmacy.domain.UserRole
@@ -104,6 +107,8 @@ interface BorgRepository {
     suspend fun syncNow()
     suspend fun backupNow(reason: String = "manual")
     suspend fun dashboardScores(): List<CompanyReportScore>
+    suspend fun getDropOffReports(): List<DropOffReport>
+    suspend fun getShiftHeatmap(): ShiftHeatmapReport
 
     suspend fun fetchBotConfig(): Pair<String, Boolean>
     suspend fun saveBotConfig(phoneNumber: String, isActive: Boolean)
@@ -775,6 +780,40 @@ class OfflineFirstBorgRepository(
             val score = (completed.toDouble() / expected.toDouble()) * 10.0
             CompanyReportScore(company, expected, completed, score.coerceAtMost(10.0))
         }
+    }
+
+    override suspend fun getDropOffReports(): List<DropOffReport> = withContext(Dispatchers.IO) {
+        val currentCycle = cycleStart().toEpochDay()
+        val visits = db.visitDao().listCycle(currentCycle).map { it.toDomain() }
+        val completedByCompany = visits
+            .filter { it.status == VisitStatus.COMPLETED }
+            .groupingBy { it.companyId }
+            .eachCount()
+
+        fetchRepresentativeInquiryReports()
+            .filter { it.searchCount > 0 }
+            .map { report ->
+                DropOffReport(
+                    representativeName = report.representativeName,
+                    companyName = report.companyName,
+                    searchCount = report.searchCount,
+                    completedVisits = completedByCompany[report.companyId] ?: 0,
+                )
+            }
+            .filter { it.completedVisits == 0 }
+            .distinctBy { it.representativeName to it.companyName }
+            .sortedWith(compareByDescending<DropOffReport> { it.searchCount }.thenBy { it.representativeName })
+    }
+
+    override suspend fun getShiftHeatmap(): ShiftHeatmapReport = withContext(Dispatchers.IO) {
+        val currentCycle = cycleStart().toEpochDay()
+        val visits = db.visitDao().listCycle(currentCycle).map { it.toDomain() }
+        ShiftHeatmapReport(
+            morningTotal = visits.count { it.shift == Shift.MORNING },
+            morningCompleted = visits.count { it.shift == Shift.MORNING && it.status == VisitStatus.COMPLETED },
+            eveningTotal = visits.count { it.shift == Shift.EVENING },
+            eveningCompleted = visits.count { it.shift == Shift.EVENING && it.status == VisitStatus.COMPLETED },
+        )
     }
 
     // 🟢 فرض استخدام Dispatchers.IO بشكل صارم لتجنب أي تعليق في الواجهة الرئيسية

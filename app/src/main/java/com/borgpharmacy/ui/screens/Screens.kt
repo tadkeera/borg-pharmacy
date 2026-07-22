@@ -31,6 +31,10 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -92,6 +96,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -127,6 +133,7 @@ private enum class Route(val label: String, val icon: ImageVector) {
     ENQUIRIES("التواصل", Icons.Default.Send),
     BOT("البوت", Icons.Default.Sync),
     DASHBOARD("التقارير", Icons.Default.Assessment),
+    USER_MANAGEMENT("إدارة المستخدمين", Icons.Default.Group),
     SETTINGS("الإعدادات", Icons.Default.Settings),
     MORE("المزيد", Icons.Default.MoreHoriz),
 }
@@ -218,6 +225,11 @@ private fun BorgColoredIcon(route: Route, isSelected: Boolean) {
                     Box(modifier = Modifier.size(4.dp, 10.dp).background(Color(0xFF22C55E)))
                     Box(modifier = Modifier.size(4.dp, 18.dp).background(Color(0xFFEF4444)))
                     Box(modifier = Modifier.size(4.dp, 14.dp).background(Color(0xFF3B82F6)))
+                }
+            }
+            Route.USER_MANAGEMENT -> {
+                Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(0xFFEAF4FF)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Group, contentDescription = null, tint = BorgBlue, modifier = Modifier.size(18.dp))
                 }
             }
             Route.SETTINGS -> {
@@ -365,6 +377,12 @@ fun BorgApp(
                         )
                     }
                 }
+                Route.USER_MANAGEMENT -> UserManagementScreen(
+                    state = state,
+                    onCreateUser = onCreateUser,
+                    onBack = { route = Route.SETTINGS.name },
+                    modifier = contentModifier,
+                )
                 Route.SETTINGS -> SettingsScreen(
                     state = state,
                     onBackup = onBackup,
@@ -372,6 +390,7 @@ fun BorgApp(
                     onDriveBackup = onDriveBackup,
                     onSync = onSync,
                     onCreateUser = onCreateUser,
+                    onOpenUserManagement = { route = Route.USER_MANAGEMENT.name },
                     modifier = contentModifier,
                 )
                 Route.MORE -> Unit
@@ -383,6 +402,23 @@ fun BorgApp(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BorgTopBar(state: BorgUiState, onLogout: () -> Unit) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showLogoutConfirm by remember { mutableStateOf(false) }
+    if (showLogoutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirm = false },
+            title = { Text("تأكيد تسجيل الخروج") },
+            text = { Text("هل تريد تسجيل الخروج من حسابك؟") },
+            confirmButton = {
+                Button(
+                    onClick = { showLogoutConfirm = false; onLogout() },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgRed)
+                ) { Text("تسجيل الخروج", color = Color.White, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { OutlinedButton(onClick = { showLogoutConfirm = false }) { Text("إلغاء") } }
+        )
+    }
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = Color.White,
@@ -408,10 +444,34 @@ private fun BorgTopBar(state: BorgUiState, onLogout: () -> Unit) {
             }
         },
         actions = {
-            IconButton(onClick = onLogout) { Icon(Icons.Default.Logout, contentDescription = "تسجيل الخروج", tint = BorgRed) }
+            Box {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(SoftBlue)
+                        .clickable { menuExpanded = true }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Group, contentDescription = null, tint = BorgBlue, modifier = Modifier.size(18.dp))
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text(state.currentUser?.displayName ?: "مستخدم", color = DeepNavy, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
+                        Text(state.currentUser?.role?.arabicLabel() ?: "-", color = Color.Gray, fontSize = 10.sp, maxLines = 1)
+                    }
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("تسجيل الخروج") },
+                        leadingIcon = { Icon(Icons.Default.Logout, contentDescription = null, tint = BorgRed) },
+                        onClick = { menuExpanded = false; showLogoutConfirm = true }
+                    )
+                }
+            }
         },
     )
 }
+
 
 @Composable
 private fun MoreRoutesBottomSheet(onDismiss: () -> Unit, onRouteSelected: (Route) -> Unit) {
@@ -1868,6 +1928,8 @@ private fun DashboardScreen(
                 }
             }
         }
+        item { DropOffReportCard(state.dropOffReports) }
+        item { ShiftHeatmapCard(state.shiftHeatmap) }
         item { ReportCard("1. الشركات الملتزمة", compliant.map { "${it.company.name}: ${"%.1f".format(it.scoreOutOf10)}/10" }) }
         item { ReportCard("2. الشركات غير الزائرة", nonVisiting.map { it.company.name }) }
         item { ReportCard("3. شركات بلا مندوبين مسجلين", noReps.map { it.name }) }
@@ -1953,6 +2015,200 @@ private fun RepresentativeInquiriesScreen(
 }
 
 @Composable
+private fun DropOffReportCard(reports: List<com.borgpharmacy.domain.DropOffReport>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(44.dp).clip(CircleShape).background(SoftRed), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = BorgRed)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("معدل التسرب", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                    Text("مندوبون بحثوا عن مواعيدهم ولم تكتمل لهم أي زيارة في الدورة الحالية.", color = Color.Gray, fontSize = 12.sp, lineHeight = 18.sp)
+                }
+            }
+            if (reports.isEmpty()) {
+                Text("لا توجد حالات تسرب حالياً.", color = Color.Gray, fontSize = 13.sp)
+            } else {
+                reports.take(8).forEach { report ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFFFF7F8)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(report.representativeName, color = DeepNavy, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(report.companyName, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(report.searchCount.toString(), color = BorgRed, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            Text("بحث", color = BorgRed, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShiftHeatmapCard(report: com.borgpharmacy.domain.ShiftHeatmapReport?) {
+    val heatmap = report ?: com.borgpharmacy.domain.ShiftHeatmapReport(0, 0, 0, 0)
+    val total = (heatmap.morningTotal + heatmap.eveningTotal).coerceAtLeast(1)
+    val morningWeight = (heatmap.morningTotal.toFloat() / total.toFloat()).coerceAtLeast(0.05f)
+    val eveningWeight = (heatmap.eveningTotal.toFloat() / total.toFloat()).coerceAtLeast(0.05f)
+    val morningPercent = ((heatmap.morningTotal * 100f) / total).toInt()
+    val eveningPercent = ((heatmap.eveningTotal * 100f) / total).toInt()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("كثافة الفترات", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+            Text("توزيع الزيارات بين الصباح والمساء مع عدد الزيارات المكتملة.", color = Color.Gray, fontSize = 12.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFFF1F5F9)),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier.weight(morningWeight).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(BorgBlue),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("الصباح ${heatmap.morningTotal} • $morningPercent%", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center)
+                }
+                Box(
+                    modifier = Modifier.weight(eveningWeight).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(BorgRed),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("المساء ${heatmap.eveningTotal} • $eveningPercent%", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                CountCard("صباح مكتمل", "${heatmap.morningCompleted}/${heatmap.morningTotal}", BorgBlue, Modifier.weight(1f))
+                CountCard("مساء مكتمل", "${heatmap.eveningCompleted}/${heatmap.eveningTotal}", BorgRed, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserManagementScreen(
+    state: BorgUiState,
+    onCreateUser: (String, String, UserRole, String) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
+    var username by rememberSaveable { mutableStateOf("") }
+    var displayName by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var showPassword by rememberSaveable { mutableStateOf(false) }
+    var role by rememberSaveable { mutableStateOf(UserRole.PHARMACIST.name) }
+    var showConfirm by rememberSaveable { mutableStateOf(false) }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text("تأكيد حفظ المستخدم") },
+            text = { Text("هل تريد إنشاء المستخدم ${displayName.ifBlank { username }} بصلاحية ${UserRole.valueOf(role).arabicLabel()}؟") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showConfirm = false
+                        onCreateUser(username, displayName, UserRole.valueOf(role), password)
+                        username = ""; displayName = ""; password = ""; role = UserRole.PHARMACIST.name
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgBlue)
+                ) { Text("حفظ", color = Color.White, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { OutlinedButton(onClick = { showConfirm = false }) { Text("إلغاء") } }
+        )
+    }
+
+    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { HeaderCard("إدارة المستخدمين", "إضافة المستخدمين وإدارة صلاحيات الدخول للنظام.", listOf(DeepNavy, BorgBlue)) }
+        item {
+            OutlinedButton(onClick = onBack, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) { Text("رجوع للإعدادات", fontWeight = FontWeight.Bold) }
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("إضافة مستخدم", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                    OutlinedTextField(colors = borgTextFieldColors(), value = username, onValueChange = { username = it }, label = { Text("البريد الإلكتروني / اسم المستخدم") }, shape = RoundedCornerShape(14.dp), singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(colors = borgTextFieldColors(), value = displayName, onValueChange = { displayName = it }, label = { Text("الاسم الظاهر") }, shape = RoundedCornerShape(14.dp), singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+                        colors = borgTextFieldColors(),
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("كلمة المرور") },
+                        shape = RoundedCornerShape(14.dp),
+                        singleLine = true,
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPassword = !showPassword }) {
+                                Icon(if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null, tint = BorgBlue)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Text("الدور", color = DeepNavy, fontWeight = FontWeight.Bold)
+                        RoleDropdown(UserRole.valueOf(role)) { role = it.name }
+                    }
+                    Button(
+                        onClick = { showConfirm = true },
+                        enabled = username.isNotBlank() && password.length >= 6,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgBlue),
+                        modifier = Modifier.fillMaxWidth().height(52.dp)
+                    ) { Text("حفظ", color = Color.White, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+        item {
+            Text("جدول المستخدمين", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+        }
+        items(state.users, key = { it.id }) { user ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Row(Modifier.padding(14.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.size(42.dp).clip(CircleShape).background(if (user.role == UserRole.ADMIN) SoftRed else SoftBlue), contentAlignment = Alignment.Center) {
+                        Icon(if (user.role == UserRole.ADMIN) Icons.Default.Settings else Icons.Default.Group, contentDescription = null, tint = if (user.role == UserRole.ADMIN) BorgRed else BorgBlue)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(user.displayName, color = DeepNavy, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(user.username, color = Color.Gray, fontSize = 12.sp)
+                        Text("****** • ${user.role.arabicLabel()}", color = Color(0xFF64748B), fontSize = 12.sp)
+                    }
+                    IconButton(onClick = { }, enabled = user.username != "admin") { Icon(Icons.Default.Edit, contentDescription = "تعديل", tint = BorgBlue) }
+                    IconButton(onClick = { }, enabled = user.username != "admin") { Icon(Icons.Default.Delete, contentDescription = "حذف", tint = if (user.username != "admin") BorgRed else Color.LightGray) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsScreen(
     state: BorgUiState,
     onBackup: () -> Unit,
@@ -1960,6 +2216,7 @@ private fun SettingsScreen(
     onDriveBackup: () -> Unit,
     onSync: () -> Unit,
     onCreateUser: (String, String, UserRole, String) -> Unit,
+    onOpenUserManagement: () -> Unit,
     modifier: Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -2041,10 +2298,29 @@ private fun SettingsScreen(
                     }
                 }
             }
-            
             if (state.isAdmin) {
                 item {
-                    UserManagementCard(state, onCreateUser)
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenUserManagement() },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(Modifier.size(46.dp).clip(CircleShape).background(SoftBlue), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Group, contentDescription = null, tint = BorgBlue)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("إدارة المستخدمين", fontWeight = FontWeight.ExtraBold, color = DeepNavy, fontSize = 16.sp)
+                                Text("إضافة مستخدمين وإدارة صلاحيات المدير والصيدلي.", color = Color.Gray, fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -67,6 +67,20 @@ data class RepresentativeInquiryReport(
     val lastSearchAt: String,
 )
 
+data class DropOffReport(
+    val representativeName: String,
+    val companyName: String,
+    val searchCount: Int,
+    val completedVisits: Int,
+)
+
+data class ShiftHeatmapReport(
+    val morningTotal: Int,
+    val morningCompleted: Int,
+    val eveningTotal: Int,
+    val eveningCompleted: Int,
+)
+
 data class Visit(
     val id: String = UUID.randomUUID().toString(),
     val companyId: String,

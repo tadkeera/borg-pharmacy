@@ -11,8 +11,10 @@ import com.borgpharmacy.domain.Company
 import com.borgpharmacy.domain.CompanyReportScore
 import com.borgpharmacy.domain.CycleCalculator
 import com.borgpharmacy.domain.CycleInfo
+import com.borgpharmacy.domain.DropOffReport
 import com.borgpharmacy.domain.PrintCount
 import com.borgpharmacy.domain.Representative
+import com.borgpharmacy.domain.ShiftHeatmapReport
 import com.borgpharmacy.domain.RepresentativeInquiryReport
 import com.borgpharmacy.domain.Tier
 import com.borgpharmacy.domain.UserAccount
@@ -257,7 +259,10 @@ class BorgAppViewModel(
     }
 
     private suspend fun refreshReports() {
-        _state.update { it.copy(dashboardScores = repository.dashboardScores()) }
+        val scores = repository.dashboardScores()
+        val dropOff = repository.getDropOffReports()
+        val heatmap = repository.getShiftHeatmap()
+        _state.update { it.copy(dashboardScores = scores, dropOffReports = dropOff, shiftHeatmap = heatmap) }
     }
 
     private fun snackbar(message: String) {
@@ -279,6 +284,8 @@ data class BorgUiState(
     val users: List<UserAccount> = emptyList(),
     val tierCounts: List<TierCountTuple> = emptyList(),
     val dashboardScores: List<CompanyReportScore> = emptyList(),
+    val dropOffReports: List<DropOffReport> = emptyList(),
+    val shiftHeatmap: ShiftHeatmapReport? = null,
     val message: String? = null,
     
     // 🟢 متغيرات البوت الجديدة
