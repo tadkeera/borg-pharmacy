@@ -519,70 +519,79 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun syncNow() {
-        val companies = db.companyDao().dirty()
-        val reps = db.representativeDao().dirty()
-        val visits = db.visitDao().dirty()
-        val users = db.userDao().listAll()
+    // جلب tenant_id النشط للمستخدم الحالي
+    val activeTenantId = db.appSettingsDao().getValue(AUTH_TENANT_ID_KEY)
+        ?.takeIf { it.isNotBlank() } ?: DEFAULT_TENANT_ID
 
-        // مهم: لا نوقف السحب من Supabase إذا فشلت إحدى عمليات الدفع.
-        // في الإصدارات السابقة كان فشل دفع حذف مندوب واحد يمنع Pull بالكامل، لذلك لا تظهر المندوبون المسجلون من صفحة الويب داخل التطبيق.
-        runCatching {
-            syncService.pushCompanies(companies)
-            if (companies.isNotEmpty()) db.companyDao().markClean(companies.map { it.id })
-        }.onFailure { throwable ->
-            Log.w("BorgSync", "Company push failed; continuing with pull", throwable)
-        }
+    val companies = db.companyDao().dirtyForTenant(activeTenantId)
+    val reps = db.representativeDao().dirtyForTenant(activeTenantId)
+    val visits = db.visitDao().dirtyForTenant(activeTenantId)
+    val users = db.userDao().listAllForTenant(activeTenantId)
 
-        runCatching {
-            syncService.pushRepresentatives(reps)
-            if (reps.isNotEmpty()) db.representativeDao().markClean(reps.map { it.id })
-        }.onFailure { throwable ->
-            Log.w("BorgSync", "Representative push failed; continuing with pull", throwable)
-        }
+    // دفع التعديلات المحلية للسحابة
+    runCatching {
+        syncService.pushCompanies(companies)
+        if (companies.isNotEmpty()) db.companyDao().markClean(companies.map { it.id })
+    }.onFailure { throwable -> Log.w("BorgSync", "Company push failed", throwable) }
 
-        runCatching {
-            syncService.pushVisits(visits)
-            if (visits.isNotEmpty()) db.visitDao().markClean(visits.map { it.id })
-        }.onFailure { throwable ->
-            Log.w("BorgSync", "Visit push failed; continuing with pull", throwable)
-        }
+    runCatching {
+        syncService.pushRepresentatives(reps)
+        if (reps.isNotEmpty()) db.representativeDao().markClean(reps.map { it.id })
+    }.onFailure { throwable -> Log.w("BorgSync", "Representative push failed", throwable) }
 
-        runCatching {
-            syncService.pushUsers(users)
-        }.onFailure { throwable ->
-            Log.w("BorgSync", "User push failed; continuing with pull", throwable)
-        }
+    runCatching {
+        syncService.pushVisits(visits)
+        if (visits.isNotEmpty()) db.visitDao().markClean(visits.map { it.id })
+    }.onFailure { throwable -> Log.w("BorgSync", "Visit push failed", throwable) }
 
-        val remote = runCatching { syncService.pullAll() }
-            .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed; local cache remains authoritative", throwable) }
-            .getOrNull()
-            ?: return
+    runCatching { syncService.pushUsers(users) }
+        .onFailure { throwable -> Log.w("BorgSync", "User push failed", throwable) }
 
-        db.withTransaction {
-            if (remote.companies.isNotEmpty()) {
-                val mergedCompanies = remote.companies.map { remoteCompany ->
-                    val local = db.companyDao().getById(remoteCompany.id)
-                    remoteCompany.copy(
-                        baseDayIndex = remoteCompany.baseDayIndex ?: local?.baseDayIndex,
-                        baseShift = remoteCompany.baseShift ?: local?.baseShift,
-                    )
-                }
-                db.companyDao().upsertAll(mergedCompanies)
+    // سحب البيانات من السحابة مع الفلترة بـ tenant_id النشط
+    val remote = runCatching { syncService.pullAll(activeTenantId) }
+        .onFailure { throwable -> Log.w("BorgSync", "Cloud pull failed", throwable) }
+        .getOrNull() ?: return
+
+    db.withTransaction {
+        if (remote.companies.isNotEmpty()) {
+            val mergedCompanies = remote.companies.map { remoteCompany ->
+                val local = db.companyDao().getById(remoteCompany.id)
+                remoteCompany.copy(
+                    baseDayIndex = remoteCompany.baseDayIndex ?: local?.baseDayIndex,
+                    baseShift = remoteCompany.baseShift ?: local?.baseShift,
+                )
             }
-            if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
-            if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
-            if (remote.users.isNotEmpty()) db.userDao().upsertAll(remote.users)
+            db.companyDao().upsertAll(mergedCompanies)
         }
+        if (remote.representatives.isNotEmpty()) db.representativeDao().upsertAll(remote.representatives)
+        if (remote.visits.isNotEmpty()) db.visitDao().upsertAll(remote.visits)
+        if (remote.users.isNotEmpty()) db.userDao().upsertAll(remote.users)
 
-        if (ensureCurrentCycleSchedule()) {
-            val generatedVisits = db.visitDao().dirty()
-            runCatching {
-                syncService.pushVisits(generatedVisits)
-                if (generatedVisits.isNotEmpty()) db.visitDao().markClean(generatedVisits.map { it.id })
-            }.onFailure { throwable ->
-                Log.w("BorgSync", "Generated visits push failed", throwable)
-            }
-        }
+        // إزالة جراحية محددة لأي زيارات أو مندوبين يتامى أصبحت شركاتهم محذوفة
+        db.compileStatement("""
+            DELETE FROM visits 
+            WHERE isDeleted = 1 
+               OR companyId NOT IN (SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL)
+        """).executeUpdateDelete()
+
+        db.compileStatement("""
+            DELETE FROM representatives 
+            WHERE isDeleted = 1 
+               OR companyId NOT IN (SELECT id FROM companies WHERE isDeleted = 0 AND deletedAt IS NULL)
+        """).executeUpdateDelete()
+
+        db.compileStatement("""
+            DELETE FROM companies WHERE isDeleted = 1
+        """).executeUpdateDelete()
+    }
+
+    if (ensureCurrentCycleSchedule()) {
+        val generatedVisits = db.visitDao().dirtyForTenant(activeTenantId)
+        runCatching {
+            syncService.pushVisits(generatedVisits)
+            if (generatedVisits.isNotEmpty()) db.visitDao().markClean(generatedVisits.map { it.id })
+        }.onFailure { throwable -> Log.w("BorgSync", "Generated visits push failed", throwable) }
+    }
     }
 
     private suspend fun ensureCurrentCycleSchedule(): Boolean {
