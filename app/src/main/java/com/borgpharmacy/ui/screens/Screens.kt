@@ -104,6 +104,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.borgpharmacy.R
 import com.borgpharmacy.domain.Company
+import com.borgpharmacy.domain.DropOffReport
 import com.borgpharmacy.domain.Representative
 import com.borgpharmacy.domain.Shift
 import com.borgpharmacy.domain.Tier
@@ -297,6 +298,8 @@ fun BorgApp(
         var route by rememberSaveable { mutableStateOf(Route.HOME.name) }
         var showMoreSheet by rememberSaveable { mutableStateOf(false) }
         var showRepresentativeInquiries by rememberSaveable { mutableStateOf(false) }
+        var showNoRepresentativeCompanies by rememberSaveable { mutableStateOf(false) }
+        var showDropOffDetails by rememberSaveable { mutableStateOf(false) }
         val selected = Route.valueOf(route)
         val mainRoutes = listOf(Route.HOME, Route.WEEKLY, Route.COMPANIES, Route.DASHBOARD, Route.MORE)
         if (showMoreSheet) {
@@ -305,6 +308,9 @@ fun BorgApp(
                 onRouteSelected = { target ->
                     route = target.name
                     showMoreSheet = false
+                    showRepresentativeInquiries = false
+                    showNoRepresentativeCompanies = false
+                    showDropOffDetails = false
                 }
             )
         }
@@ -323,6 +329,8 @@ fun BorgApp(
                                 } else {
                                     route = item.name
                                     showRepresentativeInquiries = false
+                                    showNoRepresentativeCompanies = false
+                                    showDropOffDetails = false
                                 }
                             },
                             icon = { BorgColoredIcon(item, itemSelected) },
@@ -362,21 +370,32 @@ fun BorgApp(
                 Route.ENQUIRIES -> EnquiriesScreen(state, onWhatsApp, contentModifier)
                 Route.BOT -> WhatsAppBotScreen(state = state, onSaveBotSettings = onSaveBotSettings, onRefreshBotData = onRefreshBotData, modifier = contentModifier)
                 Route.DASHBOARD -> {
-                    if (showRepresentativeInquiries) {
-                        RepresentativeInquiriesScreen(
+                    when {
+                        showRepresentativeInquiries -> RepresentativeInquiriesScreen(
                             state = state,
                             onBack = { showRepresentativeInquiries = false },
                             onRefresh = onRefreshRepresentativeInquiries,
                             modifier = contentModifier,
                         )
-                    } else {
-                        DashboardScreen(
+                        showNoRepresentativeCompanies -> NoRepresentativesCompaniesScreen(
+                            companies = state.companies.filter { state.repsByCompany[it.id].isNullOrEmpty() },
+                            onBack = { showNoRepresentativeCompanies = false },
+                            modifier = contentModifier,
+                        )
+                        showDropOffDetails -> DropOffReportDetailsScreen(
+                            reports = state.dropOffReports,
+                            onBack = { showDropOffDetails = false },
+                            modifier = contentModifier,
+                        )
+                        else -> DashboardScreen(
                             state = state,
                             modifier = contentModifier,
                             onOpenRepresentativeInquiries = {
                                 onRefreshRepresentativeInquiries()
                                 showRepresentativeInquiries = true
                             },
+                            onOpenNoRepresentativeCompanies = { showNoRepresentativeCompanies = true },
+                            onOpenDropOffDetails = { showDropOffDetails = true },
                         )
                     }
                 }
@@ -2105,29 +2124,18 @@ private fun DashboardScreen(
     state: BorgUiState,
     modifier: Modifier,
     onOpenRepresentativeInquiries: () -> Unit,
+    onOpenNoRepresentativeCompanies: () -> Unit,
+    onOpenDropOffDetails: () -> Unit,
 ) {
-    var from by rememberSaveable { mutableStateOf(state.cycleInfo.currentCycleStart.format(shortDateFormatter)) }
-    var to by rememberSaveable { mutableStateOf(state.cycleInfo.currentCycleEnd.format(shortDateFormatter)) }
-    val compliant = state.dashboardScores.filter { it.expectedVisits > 0 && it.completedVisits >= it.expectedVisits }
-    val nonVisiting = state.dashboardScores.filter { it.expectedVisits > 0 && it.completedVisits == 0 }
     val noReps = state.companies.filter { state.repsByCompany[it.id].isNullOrEmpty() }
-    val weak = state.dashboardScores.filter { it.expectedVisits > 0 && it.completedVisits > 0 && it.scoreOutOf10 < 5.0 }
 
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { HeaderCard("لوحة التحكم والتقارير", "إحصائيات فورية وتقارير الالتزام للفترة المحددة.", listOf(DeepNavy, BorgBlue)) }
+        item { HeaderCard("لوحة التحكم والتقارير", "إحصائيات الدورة الحالية وتقارير المندوبين والشركات.", listOf(DeepNavy, BorgBlue)) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 CountCard("إجمالي الشركات", state.companies.size.toString(), BorgRed, Modifier.weight(1f))
                 CountCard("المندوبون", state.representatives.size.toString(), BorgBlue, Modifier.weight(1f))
                 CountCard("زيارات الدورة", state.visits.count { it.cycleStartEpochDay == state.cycleInfo.currentCycleStart.toEpochDay() }.toString(), Color(0xFF2FA66A), Modifier.weight(1f))
-            }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    colors = borgTextFieldColors(),value = from, onValueChange = { from = it }, label = { Text("من") }, modifier = Modifier.weight(1f))
-                OutlinedTextField(
-                    colors = borgTextFieldColors(),value = to, onValueChange = { to = it }, label = { Text("إلى") }, modifier = Modifier.weight(1f))
             }
         }
         item {
@@ -2159,12 +2167,9 @@ private fun DashboardScreen(
                 }
             }
         }
-        item { DropOffReportCard(state.dropOffReports) }
+        item { NoRepresentativesReportCard(noReps, onOpenNoRepresentativeCompanies) }
+        item { DropOffReportCard(state.dropOffReports, onOpenDropOffDetails) }
         item { ShiftHeatmapCard(state.shiftHeatmap) }
-        item { ReportCard("1. الشركات الملتزمة", compliant.map { "${it.company.name}: ${"%.1f".format(it.scoreOutOf10)}/10" }) }
-        item { ReportCard("2. الشركات غير الزائرة", nonVisiting.map { it.company.name }) }
-        item { ReportCard("3. شركات بلا مندوبين مسجلين", noReps.map { it.name }) }
-        item { ReportCard("4. شركات ضعيفة / قليلة الزيارة", weak.map { "${it.company.name}: ${"%.1f".format(it.scoreOutOf10)}/10" }) }
     }
 }
 
@@ -2246,40 +2251,182 @@ private fun RepresentativeInquiriesScreen(
 }
 
 @Composable
-private fun DropOffReportCard(reports: List<com.borgpharmacy.domain.DropOffReport>) {
+private fun NoRepresentativesReportCard(companies: List<Company>, onOpen: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen() },
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(SoftBlue), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Business, contentDescription = null, tint = BorgBlue)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("شركات بدون مندوبين", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                Text("اضغط لعرض العدد والقائمة المتسلسلة للشركات التي لا يوجد لها مندوب مسجل.", color = Color.Gray, fontSize = 12.sp, lineHeight = 18.sp)
+                if (companies.isNotEmpty()) {
+                    Text(companies.take(2).joinToString("، ") { it.name }, color = BorgBlue, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Text(companies.size.toString(), color = BorgBlue, fontWeight = FontWeight.Black, fontSize = 22.sp)
+        }
+    }
+}
+
+@Composable
+private fun NoRepresentativesCompaniesScreen(
+    companies: List<Company>,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
+    Column(modifier.fillMaxSize()) {
+        ScreenHeader(title = "شركات بدون مندوبين", gradient = listOf(DeepNavy, BorgBlue))
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                OutlinedButton(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text("رجوع للتقارير", fontWeight = FontWeight.Bold)
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    CountCard("عدد الشركات", companies.size.toString(), BorgBlue, Modifier.weight(1f))
+                    CountCard("الحالة", if (companies.isEmpty()) "ممتاز" else "تحتاج متابعة", if (companies.isEmpty()) Color(0xFF2FA66A) else BorgRed, Modifier.weight(1f))
+                }
+            }
+            if (companies.isEmpty()) {
+                item { EmptyState("كل الشركات لديها مندوب واحد على الأقل.") }
+            } else {
+                items(companies, key = { it.id }) { company ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(Modifier.size(34.dp).clip(CircleShape).background(SoftBlue), contentAlignment = Alignment.Center) {
+                                Text("${companies.indexOf(company) + 1}", color = BorgBlue, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(company.name, color = DeepNavy, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("المعرف: ${company.id.take(8)}", color = Color.Gray, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DropOffReportCard(reports: List<DropOffReport>, onOpen: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen() },
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(44.dp).clip(CircleShape).background(SoftRed), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = BorgRed)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("معدل التسرب", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
-                    Text("مندوبون بحثوا عن مواعيدهم ولم تكتمل لهم أي زيارة في الدورة الحالية.", color = Color.Gray, fontSize = 12.sp, lineHeight = 18.sp)
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(SoftRed), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Search, contentDescription = null, tint = BorgRed)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("معدل التسرب", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                Text("مندوبون بحثوا عن مواعيدهم ولم يقوموا بأي زيارة مكتملة في الدورة الحالية.", color = Color.Gray, fontSize = 12.sp, lineHeight = 18.sp)
+                if (reports.isNotEmpty()) {
+                    Text(reports.take(2).joinToString("، ") { it.representativeName }, color = BorgRed, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(reports.size.toString(), color = BorgRed, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                Text("حالة", color = BorgRed, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DropOffReportDetailsScreen(
+    reports: List<DropOffReport>,
+    onBack: () -> Unit,
+    modifier: Modifier,
+) {
+    Column(modifier.fillMaxSize()) {
+        ScreenHeader(title = "معدل التسرب", gradient = listOf(BorgRed, DeepNavy))
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                OutlinedButton(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text("رجوع للتقارير", fontWeight = FontWeight.Bold)
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    CountCard("عدد المندوبين", reports.size.toString(), BorgRed, Modifier.weight(1f))
+                    CountCard("إجمالي مرات البحث", reports.sumOf { it.searchCount }.toString(), BorgBlue, Modifier.weight(1f))
+                }
+            }
+            item {
+                Text(
+                    "القائمة التالية تعرض أسماء المندوبين الذين بحثوا عن مواعيد شركاتهم ولم يقوموا بأي زيارة مكتملة في الدورة الحالية.",
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp
+                )
+            }
             if (reports.isEmpty()) {
-                Text("لا توجد حالات تسرب حالياً.", color = Color.Gray, fontSize = 13.sp)
+                item { EmptyState("لا توجد حالات تسرب حالياً.") }
             } else {
-                reports.take(8).forEach { report ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFFFF7F8)).padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                items(reports, key = { it.representativeName + it.companyName }) { report ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(report.representativeName, color = DeepNavy, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(report.companyName, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(report.searchCount.toString(), color = BorgRed, fontWeight = FontWeight.Black, fontSize = 18.sp)
-                            Text("بحث", color = BorgRed, fontSize = 11.sp)
+                        Row(
+                            modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(Modifier.size(34.dp).clip(CircleShape).background(SoftRed), contentAlignment = Alignment.Center) {
+                                Text("${reports.indexOf(report) + 1}", color = BorgRed, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(report.representativeName, color = DeepNavy, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(report.companyName, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(report.searchCount.toString(), color = BorgRed, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                Text("بحث", color = BorgRed, fontSize = 11.sp)
+                            }
                         }
                     }
                 }
