@@ -1741,8 +1741,8 @@ private fun String.companySearchKey(): String = lowercase(arabicLocale)
     .replace('ئ', 'ي')
     .replace('ؤ', 'و')
     .replace('ة', 'ه')
-    .replace(Regex("[^\p{L}\p{N}]+"), " ")
-    .replace(Regex("\s+"), " ")
+    .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+    .replace(Regex("""\s+"""), " ")
     .trim()
 
 @Composable
