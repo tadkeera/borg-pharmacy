@@ -100,6 +100,7 @@ interface BorgRepository {
     suspend fun deleteCompany(companyId: String)
     suspend fun deleteAllCompanies()
     suspend fun addRepresentative(companyId: String, name: String, phone: String): Representative
+    suspend fun moveRepresentative(repId: String, targetCompanyId: String)
     suspend fun deleteRepresentative(repId: String)
     suspend fun setVisitStatus(visitId: String, status: VisitStatus)
     suspend fun recordPrint(repId: String, visitId: String)
@@ -331,7 +332,8 @@ class OfflineFirstBorgRepository(
             persistBaseSlotsFromVisits(plan.visitsToUpsert)
             repairCurrentCycleLocked(start)
         }
-        afterCompanyCreated(company.id, tenantId)
+        pushCompanyImmediately(company.id, tenantId)
+        afterMutation("company")
         return company
     }
 
@@ -532,14 +534,52 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun addRepresentative(companyId: String, name: String, phone: String): Representative {
+        val tenantId = getActiveTenantId()
         val rep = Representative(companyId = companyId, name = name.trim(), phone = normalizePhone(phone))
-        db.representativeDao().upsert(rep.toEntity())
+        db.representativeDao().upsert(rep.toEntity(tenantId = tenantId))
+        pushRepresentativeImmediately(rep.id, tenantId)
         afterMutation("representative")
         return rep
     }
 
+    override suspend fun moveRepresentative(repId: String, targetCompanyId: String) {
+        val tenantId = getActiveTenantId()
+        val targetCompany = db.companyDao().getById(targetCompanyId)
+            ?.takeIf { it.tenantId == tenantId && !it.isDeleted && it.deletedAt == null }
+            ?: return
+        db.representativeDao().moveToCompany(repId, targetCompany.id, tenantId)
+        runCatching {
+            syncService.moveRepresentative(repId, targetCompany.id)
+            db.representativeDao().markClean(listOf(repId))
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Immediate representative move failed", throwable)
+            pushRepresentativeImmediately(repId, tenantId)
+        }
+        afterMutation("representative_move")
+    }
+
     override suspend fun deleteRepresentative(repId: String) {
-        db.representativeDao().softDelete(repId)
+        if (db.representativeDao().getById(repId) == null) return
+        val deletedRemotely = runCatching {
+            syncService.hardDeleteRepresentative(repId)
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Immediate representative hard delete failed", throwable)
+        }.isSuccess
+
+        if (deletedRemotely) {
+            db.representativeDao().hardDelete(repId)
+        } else {
+            db.representativeDao().softDelete(repId)
+            val pendingDelete = db.representativeDao().getById(repId)
+            runCatching {
+                if (pendingDelete != null) {
+                    syncService.pushRepresentatives(listOf(pendingDelete))
+                    db.representativeDao().hardDelete(repId)
+                }
+            }.onFailure { throwable ->
+                Log.w("BorgSync", "Fallback representative delete sync failed", throwable)
+            }
+        }
         afterMutation("representative_delete")
     }
 
@@ -923,16 +963,23 @@ class OfflineFirstBorgRepository(
         return if (trimmed.startsWith("+")) trimmed else "+967$trimmed"
     }
 
-    private fun afterCompanyCreated(companyId: String, tenantId: String) {
-        scope.launch {
-            val entity = db.companyDao().getById(companyId)?.takeIf { it.tenantId == tenantId } ?: return@launch
-            runCatching {
-                syncService.pushCompanies(listOf(entity))
-                db.companyDao().markClean(listOf(companyId))
-            }.onFailure { throwable ->
-                Log.w("BorgSync", "Immediate company sync failed", throwable)
-            }
-            syncNow()
+    private suspend fun pushCompanyImmediately(companyId: String, tenantId: String) {
+        val entity = db.companyDao().getById(companyId)?.takeIf { it.tenantId == tenantId } ?: return
+        runCatching {
+            syncService.pushCompanies(listOf(entity))
+            db.companyDao().markClean(listOf(companyId))
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Immediate company sync failed", throwable)
+        }
+    }
+
+    private suspend fun pushRepresentativeImmediately(repId: String, tenantId: String) {
+        val entity = db.representativeDao().getById(repId)?.takeIf { it.tenantId == tenantId } ?: return
+        runCatching {
+            syncService.pushRepresentatives(listOf(entity))
+            db.representativeDao().markClean(listOf(repId))
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Immediate representative sync failed", throwable)
         }
     }
 

@@ -114,7 +114,7 @@ class BorgAppViewModel(
 
     fun addCompany(name: String) = adminOnly {
         repository.addCompany(name)
-        snackbar("تمت إضافة الشركة")
+        snackbar("تمت إضافة الشركة ومزامنتها مع Supabase لتظهر في صفحة الاستعلامات")
     }
 
     fun importCompaniesCsv(csv: String) = adminOnly {
@@ -164,9 +164,14 @@ class BorgAppViewModel(
         snackbar("تم حفظ المندوب")
     }
 
+    fun moveRepresentative(repId: String, targetCompanyId: String) = adminOnly {
+        repository.moveRepresentative(repId, targetCompanyId)
+        snackbar("تم نقل المندوب ومزامنة الارتباط الجديد")
+    }
+
     fun deleteRepresentative(repId: String) = adminOnly {
         repository.deleteRepresentative(repId)
-        snackbar("تم حذف المندوب")
+        snackbar("تم حذف المندوب نهائياً من Supabase وصفحة الاستعلامات")
     }
 
     fun createUser(username: String, displayName: String, role: UserRole, passcode: String) = adminOnly {

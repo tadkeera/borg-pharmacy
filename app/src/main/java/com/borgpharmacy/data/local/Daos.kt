@@ -89,6 +89,9 @@ interface RepresentativeDao {
     suspend fun dirtyForTenant(tenantId: String): List<RepresentativeEntity>
     suspend fun dirty(): List<RepresentativeEntity> = dirtyForTenant(DEFAULT_TENANT_ID)
 
+    @Query("SELECT * FROM representatives WHERE id = :repId LIMIT 1")
+    suspend fun getById(repId: String): RepresentativeEntity?
+
     @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM representatives WHERE tenantId = :tenantId")
     suspend fun maxUpdatedAt(tenantId: String): Long
 
@@ -100,6 +103,12 @@ interface RepresentativeDao {
 
     @Query("UPDATE representatives SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE id = :repId")
     suspend fun softDelete(repId: String, deletedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE representatives SET companyId = :targetCompanyId, tenantId = :tenantId, updatedAt = :updatedAt, deletedAt = NULL, dirty = 1, syncStatus = 'PENDING', isDeleted = 0 WHERE id = :repId")
+    suspend fun moveToCompany(repId: String, targetCompanyId: String, tenantId: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM representatives WHERE id = :repId")
+    suspend fun hardDelete(repId: String)
 
     @Query("UPDATE representatives SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE tenantId = :tenantId AND isDeleted = 0")
     suspend fun softDeleteAllForTenant(tenantId: String, deletedAt: Long = System.currentTimeMillis())

@@ -153,6 +153,29 @@ class SupabaseSyncService {
         )
     }
 
+    suspend fun moveRepresentative(repId: String, targetCompanyId: String) {
+        postRpc(
+            functionName = "borg_move_representative",
+            body = buildJsonObject {
+                put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+                put("p_representative_id", repId)
+                put("p_target_company_id", targetCompanyId)
+            },
+            preferReturnMinimal = true,
+        )
+    }
+
+    suspend fun hardDeleteRepresentative(repId: String) {
+        postRpc(
+            functionName = "borg_delete_representative_forever",
+            body = buildJsonObject {
+                put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+                put("p_representative_id", repId)
+            },
+            preferReturnMinimal = true,
+        )
+    }
+
     private suspend fun pullUsers(tenantId: String): List<UserEntity> {
         val response = postRpc(
             functionName = "borg_pull_users",

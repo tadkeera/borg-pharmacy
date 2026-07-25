@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
                 onDeleteCompany = viewModel::deleteCompany,
                 onDeleteAllCompanies = viewModel::deleteAllCompanies,
                 onAddRepresentative = viewModel::addRepresentative,
+                onMoveRepresentative = viewModel::moveRepresentative,
                 onDeleteRepresentative = viewModel::deleteRepresentative,
                 onCreateUser = viewModel::createUser,
                 onSaveBotSettings = viewModel::saveBotSettings,

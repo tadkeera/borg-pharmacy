@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.UploadFile
@@ -255,6 +256,7 @@ fun BorgApp(
     onDeleteCompany: (String) -> Unit,
     onDeleteAllCompanies: () -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
+    onMoveRepresentative: (String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
     onCreateUser: (String, String, UserRole, String) -> Unit,
     onMarkVisitStatus: (String, VisitStatus) -> Unit,
@@ -353,6 +355,7 @@ fun BorgApp(
                     onDeleteCompany = onDeleteCompany,
                     onDeleteAllCompanies = onDeleteAllCompanies,
                     onAddRepresentative = onAddRepresentative,
+                    onMoveRepresentative = onMoveRepresentative,
                     onDeleteRepresentative = onDeleteRepresentative,
                     modifier = contentModifier,
                 )
@@ -1097,6 +1100,7 @@ private fun CompanyProfilesScreen(
     onDeleteCompany: (String) -> Unit,
     onDeleteAllCompanies: () -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
+    onMoveRepresentative: (String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
     modifier: Modifier,
 ) {
@@ -1199,6 +1203,7 @@ private fun CompanyProfilesScreen(
                     onUpdateCompanyName = onUpdateCompanyName,
                     onDeleteCompany = onDeleteCompany,
                     onAddRepresentative = onAddRepresentative,
+                    onMoveRepresentative = onMoveRepresentative,
                     onDeleteRepresentative = onDeleteRepresentative
                 )
             }
@@ -1242,6 +1247,7 @@ private fun CompanyProfileCard(
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onAddRepresentative: (String, String, String) -> Unit,
+    onMoveRepresentative: (String, String) -> Unit,
     onDeleteRepresentative: (String) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -1251,6 +1257,10 @@ private fun CompanyProfileCard(
     var showRepPopup by rememberSaveable(company.id) { mutableStateOf(false) }
     var repName by rememberSaveable(company.id) { mutableStateOf("") }
     var repPhone by rememberSaveable(company.id) { mutableStateOf("+967") }
+    var repToMove by remember { mutableStateOf<Representative?>(null) }
+    var targetCompanyForMove by remember { mutableStateOf<Company?>(null) }
+    var showMoveConfirm by remember { mutableStateOf(false) }
+    var repToDelete by remember { mutableStateOf<Representative?>(null) }
 
     if (showDeleteConfirm) {
         AlertDialog(
@@ -1262,6 +1272,81 @@ private fun CompanyProfileCard(
             },
             dismissButton = {
                 OutlinedButton(onClick = { showDeleteConfirm = false }) { Text("تراجع") }
+            },
+        )
+    }
+
+    repToMove?.let { rep ->
+        if (!showMoveConfirm) {
+            MoveRepresentativeDialog(
+                representative = rep,
+                currentCompany = company,
+                companies = state.companies,
+                onDismiss = {
+                    repToMove = null
+                    targetCompanyForMove = null
+                },
+                onMoveRequested = { target ->
+                    targetCompanyForMove = target
+                    showMoveConfirm = true
+                }
+            )
+        }
+    }
+
+    if (showMoveConfirm && repToMove != null && targetCompanyForMove != null) {
+        val rep = repToMove!!
+        val target = targetCompanyForMove!!
+        AlertDialog(
+            onDismissRequest = { showMoveConfirm = false },
+            title = { Text("تأكيد نقل المندوب") },
+            text = {
+                Text(
+                    "سيتم نقل المندوب ${rep.name} من شركة ${company.name} إلى شركة ${target.name}. هل تؤكد عملية النقل؟",
+                    color = DeepNavy,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onMoveRepresentative(rep.id, target.id)
+                        showMoveConfirm = false
+                        repToMove = null
+                        targetCompanyForMove = null
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgBlue),
+                    shape = RoundedCornerShape(10.dp)
+                ) { Text("نعم، نقل", color = Color.White) }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showMoveConfirm = false }, shape = RoundedCornerShape(10.dp)) { Text("لا، تراجع") }
+            },
+        )
+    }
+
+    repToDelete?.let { rep ->
+        AlertDialog(
+            onDismissRequest = { repToDelete = null },
+            title = { Text("تأكيد حذف المندوب") },
+            text = {
+                Text(
+                    "سيتم حذف المندوب ${rep.name} نهائياً من Supabase ومن سجلات صفحة الاستعلامات، وبعدها يمكن تسجيل رقمه مرة أخرى لأي شركة. هل تريد المتابعة؟",
+                    color = DeepNavy
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteRepresentative(rep.id)
+                        repToDelete = null
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgRed),
+                    shape = RoundedCornerShape(10.dp)
+                ) { Text("نعم، حذف نهائي", color = Color.White) }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { repToDelete = null }, shape = RoundedCornerShape(10.dp)) { Text("تراجع") }
             },
         )
     }
@@ -1499,11 +1584,23 @@ private fun CompanyProfileCard(
                                 Text(rep.phone, style = MaterialTheme.typography.bodySmall, color = Color.Gray, fontSize = 11.sp)
                             }
                             if (state.isAdmin) {
-                                IconButton(
-                                    onClick = { onDeleteRepresentative(rep.id) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(Icons.Default.Delete, contentDescription = null, tint = BorgRed, modifier = Modifier.size(16.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedButton(
+                                        onClick = { repToMove = rep },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = BorgBlue, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(3.dp))
+                                        Text("نقل", color = BorgBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    IconButton(
+                                        onClick = { repToDelete = rep },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, tint = BorgRed, modifier = Modifier.size(16.dp))
+                                    }
                                 }
                             }
                         }
@@ -1513,6 +1610,140 @@ private fun CompanyProfileCard(
         }
     }
 }
+
+
+@Composable
+private fun MoveRepresentativeDialog(
+    representative: Representative,
+    currentCompany: Company,
+    companies: List<Company>,
+    onDismiss: () -> Unit,
+    onMoveRequested: (Company) -> Unit,
+) {
+    var query by rememberSaveable(representative.id) { mutableStateOf("") }
+    var selectedCompanyId by rememberSaveable(representative.id) { mutableStateOf<String?>(null) }
+    val normalizedQuery = query.companySearchKey()
+    val matches = if (normalizedQuery.length >= 3) {
+        companies
+            .asSequence()
+            .filter { it.id != currentCompany.id }
+            .filter { company ->
+                val key = company.name.companySearchKey()
+                key.contains(normalizedQuery) || normalizedQuery.contains(key)
+            }
+            .sortedBy { it.name }
+            .take(8)
+            .toList()
+    } else {
+        emptyList()
+    }
+    val selectedCompany = companies.firstOrNull { it.id == selectedCompanyId }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("نقل المندوب", color = DeepNavy, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "المندوب: ${representative.name}",
+                    color = DeepNavy,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                Text(
+                    "الشركة الحالية: ${currentCompany.name}",
+                    color = Color.Gray,
+                    fontSize = 12.sp
+                )
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = {
+                        query = it
+                        selectedCompanyId = null
+                    },
+                    label = { Text("ابحث عن الشركة الجديدة - 3 أحرف على الأقل") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = BorgBlue) },
+                    singleLine = true,
+                    colors = borgTextFieldColors(),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                when {
+                    query.isBlank() || normalizedQuery.length < 3 -> {
+                        Text("اكتب ثلاثة أحرف من اسم الشركة لعرض القائمة المنسدلة.", color = Color.Gray, fontSize = 12.sp)
+                    }
+                    matches.isEmpty() -> {
+                        Text("لا توجد شركة مطابقة ضمن الشركات النشطة.", color = BorgRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(BorderStroke(1.dp, Color(0xFFE2ECF5)), RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White)
+                        ) {
+                            matches.forEach { company ->
+                                val selected = selectedCompanyId == company.id
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { selectedCompanyId = company.id }
+                                        .background(if (selected) SoftBlue else Color.White)
+                                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clip(CircleShape)
+                                            .border(BorderStroke(2.dp, if (selected) BorgBlue else Color(0xFFCBD5E1)), CircleShape)
+                                            .background(if (selected) BorgBlue else Color.Transparent),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (selected) Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color.White))
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(company.name, color = DeepNavy, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("المعرف: ${company.id.take(8)}", color = Color.Gray, fontSize = 10.sp)
+                                    }
+                                }
+                                if (company != matches.last()) HorizontalDivider(color = Color(0xFFF1F5F9))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { selectedCompany?.let(onMoveRequested) },
+                enabled = selectedCompany != null,
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = BorgBlue),
+                shape = RoundedCornerShape(10.dp)
+            ) { Text("نقل", color = Color.White, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) { Text("إلغاء") }
+        },
+    )
+}
+
+private fun String.companySearchKey(): String = lowercase(arabicLocale)
+    .replace(Regex("[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]"), "")
+    .replace('أ', 'ا')
+    .replace('إ', 'ا')
+    .replace('آ', 'ا')
+    .replace('ٱ', 'ا')
+    .replace('ى', 'ي')
+    .replace('ئ', 'ي')
+    .replace('ؤ', 'و')
+    .replace('ة', 'ه')
+    .replace(Regex("[^\p{L}\p{N}]+"), " ")
+    .replace(Regex("\s+"), " ")
+    .trim()
 
 @Composable
 private fun EnquiriesScreen(

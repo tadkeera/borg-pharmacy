@@ -877,6 +877,35 @@
       };
     }
 
+    async function refreshRepresentativeProfile(profile) {
+      if (!profile?.id) return profile;
+      try {
+        const { data, error } = await db.rpc("get_representative_portal_profile", {
+          p_representative_id: profile.id
+        });
+        if (error) throw error;
+        const result = Array.isArray(data) ? data[0] : data;
+        const freshProfile = profileFromExistingResult(result || {});
+        if (!freshProfile) {
+          localStorage.removeItem(REPRESENTATIVE_STORAGE_KEY);
+          activeRepresentative = null;
+          showRegistrationForm();
+          showStatus("warn", "تم حذف بيانات هذا المندوب من النظام. يمكنك تسجيله من جديد لأي شركة.");
+          return null;
+        }
+        freshProfile.restoredFromDuplicate = profile.restoredFromDuplicate || false;
+        saveRepresentativeProfile(freshProfile);
+        activeRepresentative = freshProfile;
+        if (profile.company?.id !== freshProfile.company.id || profile.name !== freshProfile.name || profile.phone !== freshProfile.phone) {
+          showSearchPanel(freshProfile);
+        }
+        return freshProfile;
+      } catch (error) {
+        console.warn("Unable to refresh representative profile:", error);
+        return profile;
+      }
+    }
+
     function buildConflictMessage(result) {
       const phoneLine = result?.status === "phone_exists" ? "رقم الجوال مسجل مسبقاً<br><br>" : "";
       return `
@@ -985,9 +1014,11 @@
       try {
         setButtonLoading(lookupButton, true, "بحث", "جاري البحث عن جدول الزيارات");
         showStatus("info", 'جاري البحث عن جدول الزيارات <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>');
-        await logRepresentativeSearch(activeRepresentative);
-        const schedules = await fetchSchedules(activeRepresentative.company);
-        renderResults(activeRepresentative.company, schedules);
+        const freshProfile = await refreshRepresentativeProfile(activeRepresentative);
+        if (!freshProfile) return;
+        await logRepresentativeSearch(freshProfile);
+        const schedules = await fetchSchedules(freshProfile.company);
+        renderResults(freshProfile.company, schedules);
       } catch (error) {
         console.error("Lookup error:", error);
         results.innerHTML = "";
@@ -1040,8 +1071,10 @@
       });
 
       const savedProfile = loadRepresentativeProfile();
-      if (savedProfile) showSearchPanel(savedProfile);
-      else showRegistrationForm();
+      if (savedProfile) {
+        showSearchPanel(savedProfile);
+        refreshRepresentativeProfile(savedProfile);
+      } else showRegistrationForm();
     }
 
     init();
