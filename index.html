@@ -483,17 +483,19 @@
     }
 
     async function queryCompaniesByColumn(column, term) {
-      // الأهم هنا: فلترة deleted_at = null حتى لا تظهر الشركات المحذوفة/القديمة في القائمة.
+      // التعديل الجذري: جلب الشركات النشطة فقط والتابعة لنفس مساحة عمل التطبيق
       let response = await db
         .from("companies")
-        .select(`id, ${column}, deleted_at, updated_at`)
+        .select(`id, ${column}, deleted_at, is_deleted, tenant_id, updated_at`)
         .ilike(column, `%${term}%`)
         .is("deleted_at", null)
+        .eq("is_deleted", false) // استبعاد الشركات المعطلة أو المحذوفة
+        .eq("tenant_id", "00000000-0000-0000-0000-000000000001") // مطابقة الـ Tenant الخاص بالتطبيق
         .order(column, { ascending: true })
         .limit(50);
 
-      // توافق احتياطي لو كانت قاعدة أخرى لا تحتوي deleted_at/updated_at.
-      if (response.error && /deleted_at|updated_at/i.test(response.error.message || "")) {
+      // توافق احتياطي في حال كان هناك خطأ في جلب الأعمدة
+      if (response.error && /deleted_at|is_deleted|tenant_id|updated_at/i.test(response.error.message || "")) {
         response = await db
           .from("companies")
           .select(`id, ${column}`)
