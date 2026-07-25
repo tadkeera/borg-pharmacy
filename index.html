@@ -322,6 +322,7 @@
      * ملاحظة مهمة: مفتاح anon آمن للنشر فقط عند تفعيل RLS ومنع الكتابة.
      **********************************************************************/
     const SUPABASE_URL = "https://dtkldxmfkhipdgiltzjl.supabase.co";
+    const APP_TENANT_ID = "00000000-0000-0000-0000-000000000001";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0a2xkeG1ma2hpcGRnaWx0empsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNzY3NjIsImV4cCI6MjA5ODg1Mjc2Mn0.jXEUggNeO_tvt2lm7BRRbzm4p1eI-WZRvojLVdKn2fg";
 
     const registrationForm = document.getElementById("registrationForm");
@@ -366,19 +367,21 @@
         .replaceAll("'", "&#039;");
     }
 
-    /** تهذيب بسيط للنص العربي للمقارنة فقط. */
+    /** تهذيب عربي عميق للمقارنة والبحث: تجاهل الهمزات، التشكيل، المدّ، الفواصل والرموز. */
     function normalizeArabic(value) {
       return String(value ?? "")
         .trim()
         .toLowerCase()
-        .replace(/[\u064B-\u065F\u0670]/g, "")
+        .normalize("NFKD")
+        .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g, "")
         .replace(/[إأآٱ]/g, "ا")
         .replace(/ى/g, "ي")
         .replace(/ة/g, "ه")
         .replace(/ؤ/g, "و")
         .replace(/ئ/g, "ي")
         .replace(/[^\p{L}\p{N}]+/gu, " ")
-        .replace(/\s+/g, " ");
+        .replace(/\s+/g, " ")
+        .trim();
     }
 
     /** منع أحرف wildcard غير المرغوبة داخل ilike قدر الإمكان. */
@@ -438,14 +441,18 @@
 
     function buildCompanySearchTerms(term) {
       const cleaned = cleanSearchTerm(term);
+      const normalized = normalizeArabic(cleaned);
       const withoutDashes = cleaned.replace(/[-–—]+/g, " ").replace(/\s+/g, " ").trim();
-      const words = withoutDashes.split(" ").filter(word => word.length >= 3);
+      const normalizedWithoutDashes = normalizeArabic(withoutDashes);
+      const words = normalizedWithoutDashes.split(" ").filter(word => word.length >= 3);
       return uniqueValues([
         cleaned,
+        normalized,
         withoutDashes,
+        normalizedWithoutDashes,
         words.slice(0, 2).join(" "),
         words[0]
-      ]).filter(value => value.length >= 3);
+      ]).filter(value => value.length >= 2);
     }
 
     function mergeAndDedupeCompanies(rows, typedTerm) {
@@ -483,6 +490,16 @@
     }
 
     async function queryCompaniesByColumn(column, term) {
+      // البحث الذكي عبر RPC: يتجاهل الهمزات والتشكيل والفواصل، ويعيد الشركات النشطة لنفس الـ Tenant فقط.
+      if (column === "name") {
+        const fuzzyResponse = await db.rpc("search_active_companies_portal", {
+          p_term: term,
+          p_limit: 50
+        });
+        if (!fuzzyResponse.error) return fuzzyResponse;
+        console.warn("Fuzzy company search RPC failed; falling back to PostgREST ilike", fuzzyResponse.error);
+      }
+
       // التعديل الجذري: جلب الشركات النشطة فقط والتابعة لنفس مساحة عمل التطبيق
       let response = await db
         .from("companies")
@@ -490,7 +507,7 @@
         .ilike(column, `%${term}%`)
         .is("deleted_at", null)
         .eq("is_deleted", false) // استبعاد الشركات المعطلة أو المحذوفة
-        .eq("tenant_id", "00000000-0000-0000-0000-000000000001") // مطابقة الـ Tenant الخاص بالتطبيق
+        .eq("tenant_id", APP_TENANT_ID) // مطابقة الـ Tenant الخاص بالتطبيق
         .order(column, { ascending: true })
         .limit(50);
 

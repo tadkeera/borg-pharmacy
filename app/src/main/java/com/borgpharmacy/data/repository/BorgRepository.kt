@@ -320,9 +320,10 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun addCompany(name: String): Company {
+        val tenantId = getActiveTenantId()
         val company = Company(name = name.trim().ifBlank { "شركة بدون اسم" })
         db.withTransaction {
-            db.companyDao().upsert(company.toEntity())
+            db.companyDao().upsert(company.toEntity(tenantId = tenantId))
             val start = cycleStart()
             val visits = db.visitDao().listCycle(start.toEpochDay()).map { it.toDomain() }
             val plan = scheduleGenerator.reconcileSingleCompany(start, company, visits)
@@ -330,7 +331,7 @@ class OfflineFirstBorgRepository(
             persistBaseSlotsFromVisits(plan.visitsToUpsert)
             repairCurrentCycleLocked(start)
         }
-        afterMutation("company")
+        afterCompanyCreated(company.id, tenantId)
         return company
     }
 
@@ -920,6 +921,19 @@ class OfflineFirstBorgRepository(
     private fun normalizePhone(input: String): String {
         val trimmed = input.trim().ifBlank { "+967" }
         return if (trimmed.startsWith("+")) trimmed else "+967$trimmed"
+    }
+
+    private fun afterCompanyCreated(companyId: String, tenantId: String) {
+        scope.launch {
+            val entity = db.companyDao().getById(companyId)?.takeIf { it.tenantId == tenantId } ?: return@launch
+            runCatching {
+                syncService.pushCompanies(listOf(entity))
+                db.companyDao().markClean(listOf(companyId))
+            }.onFailure { throwable ->
+                Log.w("BorgSync", "Immediate company sync failed", throwable)
+            }
+            syncNow()
+        }
     }
 
     private fun afterMutation(reason: String) {
