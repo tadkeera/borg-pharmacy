@@ -186,6 +186,7 @@ class BorgAppViewModel(
 
     fun recordPrint(repId: String, visitId: String) = viewModelScope.launch {
         repository.recordPrint(repId, visitId)
+        refreshReports()
     }
 
     fun backupNow() = viewModelScope.launch {

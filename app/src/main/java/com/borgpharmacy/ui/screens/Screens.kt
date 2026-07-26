@@ -52,6 +52,8 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -77,6 +79,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -114,7 +117,12 @@ import com.borgpharmacy.domain.VisitStatus
 import com.borgpharmacy.domain.borgArabicName
 import com.borgpharmacy.domain.isBorgWorkingDay
 import com.borgpharmacy.ui.BorgUiState
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -253,6 +261,7 @@ fun BorgApp(
     onImportCsv: () -> Unit,
     onExportCompanies: (String) -> Unit,
     onExportSchedules: (String) -> Unit,
+    onExportMonthlyReport: (LocalDate, LocalDate, String) -> Unit,
     onUpdateCompanyName: (String, String) -> Unit,
     onDeleteCompany: (String) -> Unit,
     onDeleteAllCompanies: () -> Unit,
@@ -300,6 +309,7 @@ fun BorgApp(
         var showRepresentativeInquiries by rememberSaveable { mutableStateOf(false) }
         var showNoRepresentativeCompanies by rememberSaveable { mutableStateOf(false) }
         var showDropOffDetails by rememberSaveable { mutableStateOf(false) }
+        var showMonthlyReport by rememberSaveable { mutableStateOf(false) }
         val selected = Route.valueOf(route)
         val mainRoutes = listOf(Route.HOME, Route.WEEKLY, Route.COMPANIES, Route.DASHBOARD, Route.MORE)
         if (showMoreSheet) {
@@ -311,6 +321,7 @@ fun BorgApp(
                     showRepresentativeInquiries = false
                     showNoRepresentativeCompanies = false
                     showDropOffDetails = false
+                    showMonthlyReport = false
                 }
             )
         }
@@ -331,6 +342,7 @@ fun BorgApp(
                                     showRepresentativeInquiries = false
                                     showNoRepresentativeCompanies = false
                                     showDropOffDetails = false
+                                    showMonthlyReport = false
                                 }
                             },
                             icon = { BorgColoredIcon(item, itemSelected) },
@@ -387,6 +399,12 @@ fun BorgApp(
                             onBack = { showDropOffDetails = false },
                             modifier = contentModifier,
                         )
+                        showMonthlyReport -> MonthlyReportScreen(
+                            state = state,
+                            onBack = { showMonthlyReport = false },
+                            onExport = onExportMonthlyReport,
+                            modifier = contentModifier,
+                        )
                         else -> DashboardScreen(
                             state = state,
                             modifier = contentModifier,
@@ -396,6 +414,7 @@ fun BorgApp(
                             },
                             onOpenNoRepresentativeCompanies = { showNoRepresentativeCompanies = true },
                             onOpenDropOffDetails = { showDropOffDetails = true },
+                            onOpenMonthlyReport = { showMonthlyReport = true },
                         )
                     }
                 }
@@ -858,21 +877,12 @@ private fun VisitTableRow(
                         IconButton(onClick = { onPrint(company, rep, visit) }) { Icon(Icons.Default.Print, contentDescription = "طباعة تصريح", tint = accent) }
                     }
                 }
-                if (state.isAdmin) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = { onMarkVisitStatus(visit.id, VisitStatus.COMPLETED) },
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, BorgBlue)
-                        ) { Text("تأكيد الزيارة", fontSize = 12.sp, color = BorgBlue, fontWeight = FontWeight.Bold) }
-                        
-                        OutlinedButton(
-                            onClick = { onMarkVisitStatus(visit.id, VisitStatus.MISSED) },
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, BorgRed)
-                        ) { Text("لم يحضر", fontSize = 12.sp, color = BorgRed, fontWeight = FontWeight.Bold) }
-                    }
-                }
+                Text(
+                    "طباعة ترخيص الدخول تؤكد حضور المندوب تلقائياً، وعدم الطباعة يعني أنه لم يحضر.",
+                    fontSize = 12.sp,
+                    color = Color.Gray,
+                    lineHeight = 18.sp
+                )
             }
         }
     }
@@ -2126,6 +2136,7 @@ private fun DashboardScreen(
     onOpenRepresentativeInquiries: () -> Unit,
     onOpenNoRepresentativeCompanies: () -> Unit,
     onOpenDropOffDetails: () -> Unit,
+    onOpenMonthlyReport: () -> Unit,
 ) {
     val noReps = state.companies.filter { state.repsByCompany[it.id].isNullOrEmpty() }
 
@@ -2170,6 +2181,7 @@ private fun DashboardScreen(
         item { NoRepresentativesReportCard(noReps, onOpenNoRepresentativeCompanies) }
         item { DropOffReportCard(state.dropOffReports, onOpenDropOffDetails) }
         item { ShiftHeatmapCard(state.shiftHeatmap) }
+        item { MonthlyReportCard(onOpenMonthlyReport) }
     }
 }
 
@@ -2239,9 +2251,9 @@ private fun RepresentativeInquiriesScreen(
                             HorizontalDivider(color = Color(0xFFF0F4F8))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                 CountCard("مرات البحث", report.searchCount.toString(), BorgRed, Modifier.weight(1f))
-                                CountCard("آخر بحث", report.lastSearchAt.ifBlank { "-" }, Color(0xFF2FA66A), Modifier.weight(1f))
+                                CountCard("آخر بحث - عدن", report.lastSearchAt.toAdenDateTimeLabel(), Color(0xFF2FA66A), Modifier.weight(1f))
                             }
-                            Text("أول بحث: ${report.firstSearchAt.ifBlank { "-" }}", color = Color.Gray, fontSize = 12.sp)
+                            Text("أول بحث - عدن: ${report.firstSearchAt.toAdenDateTimeLabel()}", color = Color.Gray, fontSize = 12.sp)
                         }
                     }
                 }
@@ -2432,6 +2444,114 @@ private fun DropOffReportDetailsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MonthlyReportCard(onOpen: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onOpen() },
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Color(0xFFE2ECF5)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(Color(0xFFEAFBF1)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Color(0xFF2FA66A))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("التقرير الشهري", color = DeepNavy, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                Text("اختر فترة زمنية وصدّر التزام الشركات والمندوبين بالزيارات حسب تراخيص الدخول المطبوعة.", color = Color.Gray, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+            Text("تصدير", color = Color(0xFF2FA66A), fontWeight = FontWeight.Black, fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
+private fun MonthlyReportScreen(
+    state: BorgUiState,
+    onBack: () -> Unit,
+    onExport: (LocalDate, LocalDate, String) -> Unit,
+    modifier: Modifier,
+) {
+    var fromEpoch by rememberSaveable { mutableStateOf(state.cycleInfo.currentCycleStart.toEpochDay()) }
+    var toEpoch by rememberSaveable { mutableStateOf(state.cycleInfo.currentCycleEnd.toEpochDay()) }
+    var exportMenu by remember { mutableStateOf(false) }
+    val fromDate = LocalDate.ofEpochDay(fromEpoch)
+    val toDate = LocalDate.ofEpochDay(toEpoch)
+    val safeFrom = minOf(fromDate, toDate)
+    val safeTo = maxOf(fromDate, toDate)
+    val visitsInRange = state.visits.filter { !it.isDeleted && it.date in safeFrom..safeTo }
+    val printedCount = visitsInRange.sumOf { visit -> state.printCounts.filter { it.visitId == visit.id }.sumOf { it.count } }
+
+    Column(modifier.fillMaxSize()) {
+        ScreenHeader(title = "التقرير الشهري", gradient = listOf(Color(0xFF2FA66A), DeepNavy))
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                OutlinedButton(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text("رجوع للتقارير", fontWeight = FontWeight.Bold)
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    DatePickerField("من", fromDate, { fromEpoch = it.toEpochDay() }, Modifier.weight(1f))
+                    DatePickerField("إلى", toDate, { toEpoch = it.toEpochDay() }, Modifier.weight(1f))
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    CountCard("زيارات الفترة", visitsInRange.size.toString(), BorgBlue, Modifier.weight(1f))
+                    CountCard("تراخيص مطبوعة", printedCount.toString(), BorgRed, Modifier.weight(1f))
+                }
+            }
+            item {
+                Box {
+                    Button(onClick = { exportMenu = true }, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        Text("تصدير التقرير", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                    DropdownMenu(expanded = exportMenu, onDismissRequest = { exportMenu = false }) {
+                        DropdownMenuItem(text = { Text("تصدير كملف PDF") }, onClick = { exportMenu = false; onExport(safeFrom, safeTo, "pdf") })
+                        DropdownMenuItem(text = { Text("تصدير كملف HTML") }, onClick = { exportMenu = false; onExport(safeFrom, safeTo, "html") })
+                        DropdownMenuItem(text = { Text("تصدير كملف CSV") }, onClick = { exportMenu = false; onExport(safeFrom, safeTo, "csv") })
+                    }
+                }
+            }
+            item {
+                Text(
+                    "التقرير يرتب الشركات من الأكثر مندوبين إلى الأقل. تظهر علامة ✓ خضراء عند طباعة ترخيص الدخول في تاريخ الزيارة، و ✕ حمراء عند عدم الطباعة.",
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DatePickerField(label: String, date: LocalDate, onDateSelected: (LocalDate) -> Unit, modifier: Modifier = Modifier) {
+    var showPicker by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { showPicker = true }, shape = RoundedCornerShape(12.dp), modifier = modifier.height(56.dp)) {
+        Text("$label: ${date.format(shortDateFormatter)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+    if (showPicker) {
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = date.toUtcPickerMillis())
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis -> onDateSelected(millis.toUtcLocalDate()) }
+                    showPicker = false
+                }) { Text("اختيار") }
+            },
+            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("إلغاء") } },
+        ) { DatePicker(state = pickerState) }
     }
 }
 
@@ -2906,6 +3026,30 @@ private fun EmptyState(text: String) {
         Text(text, color = DeepNavy, textAlign = TextAlign.Center, fontWeight = FontWeight.Medium, fontSize = 13.sp)
     }
 }
+
+private val adenZone: ZoneId = ZoneId.of("Asia/Aden")
+private val adenDateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm", Locale.US)
+
+private fun String.toAdenDateTimeLabel(): String {
+    val raw = trim()
+    if (raw.isBlank()) return "-"
+    val normalizedSpaces = raw.replace(' ', 'T')
+    val isoLike = if (Regex("""[+-]\d{2}$""").containsMatchIn(normalizedSpaces)) {
+        "$normalizedSpaces:00"
+    } else {
+        normalizedSpaces
+    }
+    return runCatching {
+        OffsetDateTime.parse(isoLike).atZoneSameInstant(adenZone).format(adenDateTimeFormatter)
+    }.recoverCatching {
+        Instant.parse(isoLike).atZone(adenZone).format(adenDateTimeFormatter)
+    }.recoverCatching {
+        LocalDateTime.parse(isoLike.substringBefore('+').substringBefore('Z')).atZone(ZoneOffset.UTC).withZoneSameInstant(adenZone).format(adenDateTimeFormatter)
+    }.getOrDefault(raw)
+}
+
+private fun LocalDate.toUtcPickerMillis(): Long = atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+private fun Long.toUtcLocalDate(): LocalDate = Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
 
 private fun Tier.arabicLabel(): String = when (this) {
     Tier.A -> "الفئة A (ثلاث زيارات)"

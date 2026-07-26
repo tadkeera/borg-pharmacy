@@ -39,9 +39,11 @@ import com.borgpharmacy.ui.BorgUiState
 import com.borgpharmacy.ui.BorgViewModelFactory
 import com.borgpharmacy.ui.screens.BorgApp
 import com.borgpharmacy.ui.theme.BorgPharmacyTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
+import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
 
@@ -85,6 +87,7 @@ class MainActivity : ComponentActivity() {
                 onImportCsv = { csvLauncher.launch("text/*") },
                 onExportCompanies = { format -> exportCompanies(format, state.companies) },
                 onExportSchedules = { format -> exportSchedules(format, state) },
+                onExportMonthlyReport = { from, to, format -> exportMonthlyReport(format, from, to, state) },
                 onUpdateCompanyName = viewModel::updateCompanyName,
                 onDeleteCompany = viewModel::deleteCompany,
                 onDeleteAllCompanies = viewModel::deleteAllCompanies,
@@ -98,8 +101,11 @@ class MainActivity : ComponentActivity() {
                 onMarkVisitStatus = viewModel::markVisitStatus,
                 onShareToday = { shareTodayStories(state) },
                 onPrint = { company: Company, rep: Representative, visit: Visit ->
-                    printer.printPass(company, rep, visit)
+                    // عداد الطباعة وتأكيد حضور المندوب يتمان فور الضغط على زر الطباعة.
                     viewModel.recordPrint(rep.id, visit.id)
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        printer.printPass(company, rep, visit)
+                    }
                 },
                 onWhatsApp = { company: Company, rep: Representative ->
                     container.whatsAppMessenger.openItinerary(
@@ -810,6 +816,167 @@ class MainActivity : ComponentActivity() {
 
     private fun List<Visit>.scheduleDisplaySorted(): List<Visit> = sortedWith(compareBy<Visit> { it.createdAt }.thenBy { it.id })
 
+
+    private data class MonthlyCompanyReport(
+        val company: Company,
+        val representatives: List<Representative>,
+        val visitsByWeek: Map<Int, Visit>,
+        val printedByRepWeek: Map<Pair<String, Int>, Boolean>,
+        val percent: Int,
+    ) {
+        fun printed(rep: Representative, week: Int): Boolean = printedByRepWeek[rep.id to week] == true
+    }
+
+    private fun exportMonthlyReport(format: String, from: LocalDate, to: LocalDate, state: BorgUiState) {
+        val safeFrom = minOf(from, to)
+        val safeTo = maxOf(from, to)
+        val dir = File(getExternalFilesDir(null), "EXPORTS").apply { mkdirs() }
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val allReports = monthlyCompanyReports(safeFrom, safeTo, state)
+        val reports = allReports.filterNot { it.representatives.isEmpty() && it.visitsByWeek.isEmpty() }
+        val noActivityCompanies = state.companies
+            .filter { company ->
+                state.repsByCompany[company.id].orEmpty().isEmpty() &&
+                    state.visits.none { it.companyId == company.id && !it.isDeleted && it.date in safeFrom..safeTo }
+            }
+            .sortedBy { it.name }
+
+        val file = when (format.lowercase(Locale.US)) {
+            "csv" -> File(dir, "borg_monthly_report_$stamp.csv").also { writeMonthlyReportCsv(it, safeFrom, safeTo, reports, noActivityCompanies) }
+            "html" -> File(dir, "borg_monthly_report_$stamp.html").also { writeMonthlyReportHtml(it, safeFrom, safeTo, reports, noActivityCompanies) }
+            "pdf" -> File(dir, "borg_monthly_report_$stamp.pdf").also { writeMonthlyReportPdf(it, safeFrom, safeTo, reports, noActivityCompanies) }
+            else -> return
+        }
+        val uri = (application as BorgPharmacyApplication).container.backupService.uriFor(file)
+        val mime = when (file.extension.lowercase(Locale.US)) {
+            "csv" -> "text/csv"
+            "html" -> "text/html"
+            "pdf" -> "application/pdf"
+            else -> "application/octet-stream"
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "التقرير الشهري لصيدلية برج الأطباء")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "تصدير التقرير الشهري"))
+    }
+
+    private fun monthlyCompanyReports(from: LocalDate, to: LocalDate, state: BorgUiState): List<MonthlyCompanyReport> {
+        val printCounts = state.printCountMap
+        return state.companies
+            .map { company ->
+                val reps = state.repsByCompany[company.id].orEmpty().sortedBy { it.name }
+                val visitsByWeek = state.visits
+                    .filter { it.companyId == company.id && !it.isDeleted && it.date in from..to }
+                    .groupBy { it.weekOfCycle }
+                    .mapValues { (_, visits) -> visits.sortedWith(compareBy<Visit> { it.date }.thenBy { it.shift.ordinal }).first() }
+                val printedByRepWeek = reps.flatMap { rep ->
+                    visitsByWeek.map { (week, visit) ->
+                        (rep.id to week) to ((printCounts[rep.id to visit.id] ?: 0) > 0)
+                    }
+                }.toMap()
+                val expected = reps.size * visitsByWeek.size
+                val completed = printedByRepWeek.count { it.value }
+                val percent = if (expected == 0) 0 else ((completed * 100.0) / expected).toInt().coerceIn(0, 100)
+                MonthlyCompanyReport(company, reps, visitsByWeek, printedByRepWeek, percent)
+            }
+            .sortedWith(compareByDescending<MonthlyCompanyReport> { it.representatives.size }.thenBy { it.company.name })
+    }
+
+    private fun writeMonthlyReportCsv(file: File, from: LocalDate, to: LocalDate, reports: List<MonthlyCompanyReport>, noActivityCompanies: List<Company>) {
+        fun csv(value: String): String = "\"${value.replace("\"", "\"\"")}\""
+        file.writeText(buildString {
+            append("\uFEFFالتقرير الشهري من,${csv(from.toString())},إلى,${csv(to.toString())}\n")
+            append("اسم الشركة,مندوبين الشركة,الأسبوع 1,الأسبوع 2,الأسبوع 3,الأسبوع 4,تقييم الشركة\n")
+            reports.forEach { report ->
+                val reps = report.representatives.ifEmpty { listOf(Representative(companyId = report.company.id, name = "لا يوجد مندوب")) }
+                reps.forEach { rep ->
+                    append(csv(report.company.name)).append(',')
+                    append(csv(rep.name)).append(',')
+                    (1..4).forEach { week ->
+                        val visit = report.visitsByWeek[week]
+                        val printed = visit != null && report.representatives.isNotEmpty() && report.printed(rep, week)
+                        append(csv(if (visit == null) "-" else "${visit.date} ${if (printed) "✓" else "✕"}")).append(',')
+                    }
+                    append(csv("${report.percent}%")).append('\n')
+                }
+            }
+            append("\nشركات بدون مندوبين وبدون زيارات\n")
+            append("اسم الشركة\n")
+            noActivityCompanies.forEach { append(csv(it.name)).append('\n') }
+        }, Charsets.UTF_8)
+    }
+
+    private fun writeMonthlyReportHtml(file: File, from: LocalDate, to: LocalDate, reports: List<MonthlyCompanyReport>, noActivityCompanies: List<Company>) {
+        fun esc(value: String): String = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+        file.writeText(buildString {
+            append("""
+                <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+                <style>
+                body{font-family:Arial,sans-serif;padding:24px;color:#082B52} h1{color:#0E4D8F}.company{page-break-inside:avoid;margin:22px 0;padding:14px;border:1px solid #dbe7f3;border-radius:14px}
+                table{width:100%;border-collapse:collapse;margin-top:8px} th{background:#0E4D8F;color:white}td,th{border:1px solid #ddd;padding:8px;text-align:center}.ok{color:#149447;font-weight:900}.bad{color:#C8172B;font-weight:900}.score{font-weight:900;color:#0E4D8F}
+                </style><title>التقرير الشهري</title></head><body><h1>التقرير الشهري</h1><p>من ${esc(from.toString())} إلى ${esc(to.toString())}</p>
+            """.trimIndent())
+            reports.forEach { report ->
+                append("<section class='company'><h2>اسم الشركة: ${esc(report.company.name)}</h2>")
+                append("<table><thead><tr><th>مندوبين الشركة</th>")
+                (1..4).forEach { week -> append("<th>تاريخ زيارة الأسبوع $week<br>${esc(report.visitsByWeek[week]?.date?.toString() ?: "-")}</th>") }
+                append("</tr></thead><tbody>")
+                val reps = report.representatives.ifEmpty { listOf(Representative(companyId = report.company.id, name = "لا يوجد مندوب")) }
+                reps.forEach { rep ->
+                    append("<tr><td>${esc(rep.name)}</td>")
+                    (1..4).forEach { week ->
+                        val visit = report.visitsByWeek[week]
+                        val printed = visit != null && report.representatives.isNotEmpty() && report.printed(rep, week)
+                        append(if (visit == null) "<td>-</td>" else "<td class='${if (printed) "ok" else "bad"}'>${if (printed) "✓" else "✕"}</td>")
+                    }
+                    append("</tr>")
+                }
+                append("</tbody></table><p class='score'>تقييم الشركة: ${report.percent}%</p></section>")
+            }
+            append("<h2>الشركات التي ليس لديها مندوبين وليس لديها زيارات</h2><table><thead><tr><th>#</th><th>اسم الشركة</th></tr></thead><tbody>")
+            noActivityCompanies.forEachIndexed { index, company -> append("<tr><td>${index + 1}</td><td>${esc(company.name)}</td></tr>") }
+            append("</tbody></table></body></html>")
+        }, Charsets.UTF_8)
+    }
+
+    private fun writeMonthlyReportPdf(file: File, from: LocalDate, to: LocalDate, reports: List<MonthlyCompanyReport>, noActivityCompanies: List<Company>) {
+        val document = PdfDocument()
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(14, 77, 143); textSize = 18f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); textAlign = Paint.Align.RIGHT }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = 10f; textAlign = Paint.Align.RIGHT }
+        val greenPaint = Paint(paint).apply { color = Color.rgb(20, 148, 71); typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+        val redPaint = Paint(paint).apply { color = Color.rgb(200, 23, 43); typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+        val pageWidth = 595
+        val pageHeight = 842
+        var pageNumber = 1
+        var page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+        var canvas = page.canvas
+        var y = 42f
+        fun newPage() { document.finishPage(page); pageNumber++; page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()); canvas = page.canvas; y = 42f }
+        fun line(text: String, p: Paint = paint, step: Float = 16f) { if (y > pageHeight - 42f) newPage(); canvas.drawText(text, pageWidth - 32f, y, p); y += step }
+        line("التقرير الشهري", titlePaint, 24f)
+        line("من $from إلى $to", paint, 22f)
+        reports.forEach { report ->
+            line("اسم الشركة: ${report.company.name}", titlePaint, 22f)
+            val reps = report.representatives.ifEmpty { listOf(Representative(companyId = report.company.id, name = "لا يوجد مندوب")) }
+            reps.forEach { rep ->
+                val cells = (1..4).joinToString(" | ") { week ->
+                    val visit = report.visitsByWeek[week]
+                    if (visit == null) "أ$week:-" else "أ$week:${visit.date}:${if (report.representatives.isNotEmpty() && report.printed(rep, week)) "OK" else "X"}"
+                }
+                line("${rep.name}: $cells", paint, 15f)
+            }
+            line("تقييم الشركة: ${report.percent}%", if (report.percent >= 70) greenPaint else redPaint, 20f)
+        }
+        line("الشركات التي ليس لديها مندوبين وليس لديها زيارات", titlePaint, 22f)
+        noActivityCompanies.forEachIndexed { index, company -> line("${index + 1}. ${company.name}", paint, 14f) }
+        document.finishPage(page)
+        file.outputStream().use { document.writeTo(it) }
+        document.close()
+    }
+
     private fun shareLatestBackupToDrive() {
         val container = (application as BorgPharmacyApplication).container
         lifecycleScope.launch {
@@ -826,6 +993,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestBackupStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN), 2605)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 val uri = Uri.parse("package:$packageName")

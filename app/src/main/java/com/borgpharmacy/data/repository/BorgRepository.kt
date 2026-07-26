@@ -589,7 +589,10 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun recordPrint(repId: String, visitId: String) {
-        db.printLogDao().insert(PrintLogEntity(repId = repId, visitId = visitId))
+        db.withTransaction {
+            db.printLogDao().insert(PrintLogEntity(repId = repId, visitId = visitId))
+            db.visitDao().updateStatus(visitId, VisitStatus.COMPLETED.name)
+        }
         afterMutation("print")
     }
 
