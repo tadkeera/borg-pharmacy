@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
@@ -95,8 +96,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -2245,8 +2248,22 @@ private fun RepresentativeInquiriesScreen(
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val clipboard = LocalClipboardManager.current
                             Text(report.representativeName, fontWeight = FontWeight.ExtraBold, color = DeepNavy, fontSize = 16.sp)
-                            Text("رقم الهاتف: ${report.representativePhone}", color = Color.DarkGray, fontSize = 13.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    "رقم الهاتف: ${report.representativePhone}",
+                                    color = Color.DarkGray,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = { clipboard.setText(AnnotatedString(report.representativePhone)) },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "نسخ رقم الهاتف", tint = BorgBlue, modifier = Modifier.size(18.dp))
+                                }
+                            }
                             Text("الشركة: ${report.companyName}", color = BorgBlue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             HorizontalDivider(color = Color(0xFFF0F4F8))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {

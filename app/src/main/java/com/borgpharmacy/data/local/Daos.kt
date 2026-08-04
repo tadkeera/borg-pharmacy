@@ -54,6 +54,9 @@ interface CompanyDao {
     @Query("UPDATE companies SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE id = :companyId")
     suspend fun softDelete(companyId: String, deletedAt: Long = System.currentTimeMillis())
 
+    @Query("DELETE FROM companies WHERE id = :companyId")
+    suspend fun hardDelete(companyId: String)
+
     @Query("UPDATE companies SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE tenantId = :tenantId AND isDeleted = 0")
     suspend fun softDeleteAllForTenant(tenantId: String, deletedAt: Long = System.currentTimeMillis())
     suspend fun softDeleteAll(deletedAt: Long = System.currentTimeMillis()) = softDeleteAllForTenant(DEFAULT_TENANT_ID, deletedAt)
@@ -104,11 +107,17 @@ interface RepresentativeDao {
     @Query("UPDATE representatives SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE id = :repId")
     suspend fun softDelete(repId: String, deletedAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE representatives SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE companyId = :companyId AND isDeleted = 0")
+    suspend fun softDeleteForCompany(companyId: String, deletedAt: Long = System.currentTimeMillis())
+
     @Query("UPDATE representatives SET companyId = :targetCompanyId, tenantId = :tenantId, updatedAt = :updatedAt, deletedAt = NULL, dirty = 1, syncStatus = 'PENDING', isDeleted = 0 WHERE id = :repId")
     suspend fun moveToCompany(repId: String, targetCompanyId: String, tenantId: String, updatedAt: Long = System.currentTimeMillis())
 
     @Query("DELETE FROM representatives WHERE id = :repId")
     suspend fun hardDelete(repId: String)
+
+    @Query("DELETE FROM representatives WHERE companyId = :companyId")
+    suspend fun hardDeleteForCompany(companyId: String)
 
     @Query("UPDATE representatives SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE tenantId = :tenantId AND isDeleted = 0")
     suspend fun softDeleteAllForTenant(tenantId: String, deletedAt: Long = System.currentTimeMillis())
@@ -171,6 +180,9 @@ interface VisitDao {
 
     @Query("UPDATE visits SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE companyId = :companyId AND isDeleted = 0")
     suspend fun softDeleteForCompany(companyId: String, deletedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM visits WHERE companyId = :companyId")
+    suspend fun hardDeleteForCompany(companyId: String)
 
     @Query("UPDATE visits SET deletedAt = :deletedAt, updatedAt = :deletedAt, dirty = 1, syncStatus = 'PENDING', isDeleted = 1 WHERE tenantId = :tenantId AND isDeleted = 0")
     suspend fun softDeleteAllForTenant(tenantId: String, deletedAt: Long = System.currentTimeMillis())

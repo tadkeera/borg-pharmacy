@@ -513,10 +513,49 @@ class OfflineFirstBorgRepository(
     }
 
     override suspend fun deleteCompany(companyId: String) {
+        val tenantId = getActiveTenantId()
+        val timestamp = System.currentTimeMillis()
+        var companyTombstone: CompanyEntity? = null
+        var representativeTombstones: List<RepresentativeEntity> = emptyList()
+        var visitTombstones: List<VisitEntity> = emptyList()
+
         db.withTransaction {
-            db.companyDao().softDelete(companyId)
-            db.visitDao().softDeleteForCompany(companyId)
+            db.companyDao().softDelete(companyId, timestamp)
+            db.representativeDao().softDeleteForCompany(companyId, timestamp)
+            db.visitDao().softDeleteForCompany(companyId, timestamp)
+            companyTombstone = db.companyDao().getById(companyId)
+            representativeTombstones = db.representativeDao().dirtyForTenant(tenantId).filter { it.companyId == companyId }
+            visitTombstones = db.visitDao().dirtyForTenant(tenantId).filter { it.companyId == companyId }
             repairCurrentCycleLocked(cycleStart())
+        }
+
+        val hardDeletedRemotely = runCatching {
+            syncService.hardDeleteCompany(companyId)
+        }.onFailure { throwable ->
+            Log.w("BorgSync", "Immediate company hard delete failed; falling back to tombstone sync", throwable)
+        }.isSuccess
+
+        val tombstoneSynced = if (!hardDeletedRemotely) {
+            runCatching {
+                if (visitTombstones.isNotEmpty()) syncService.pushVisits(visitTombstones)
+                if (representativeTombstones.isNotEmpty()) syncService.pushRepresentatives(representativeTombstones)
+                companyTombstone?.let { syncService.pushCompanies(listOf(it)) }
+                if (visitTombstones.isNotEmpty()) db.visitDao().markClean(visitTombstones.map { it.id })
+                if (representativeTombstones.isNotEmpty()) db.representativeDao().markClean(representativeTombstones.map { it.id })
+                companyTombstone?.let { db.companyDao().markClean(listOf(it.id)) }
+            }.onFailure { throwable ->
+                Log.w("BorgSync", "Company tombstone sync failed; pending delete will retry", throwable)
+            }.isSuccess
+        } else {
+            false
+        }
+
+        if (hardDeletedRemotely || tombstoneSynced) {
+            db.withTransaction {
+                db.visitDao().hardDeleteForCompany(companyId)
+                db.representativeDao().hardDeleteForCompany(companyId)
+                db.companyDao().hardDelete(companyId)
+            }
         }
         afterMutation("company_delete")
     }

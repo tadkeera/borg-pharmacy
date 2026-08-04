@@ -176,6 +176,17 @@ class SupabaseSyncService {
         )
     }
 
+    suspend fun hardDeleteCompany(companyId: String) {
+        postRpc(
+            functionName = "borg_delete_company_forever",
+            body = buildJsonObject {
+                put("p_token", BuildConfig.SUPABASE_SYNC_TOKEN)
+                put("p_company_id", companyId)
+            },
+            preferReturnMinimal = true,
+        )
+    }
+
     private suspend fun pullUsers(tenantId: String): List<UserEntity> {
         val response = postRpc(
             functionName = "borg_pull_users",
